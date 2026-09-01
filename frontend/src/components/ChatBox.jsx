@@ -1,15 +1,54 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { askQuestion } from '../api/chat'
 import { useAuth } from '../context/AuthContext'
 import Message from './Message'
 
+const STORAGE_KEY = 'chat:history'
+
+// Restore a previous conversation from localStorage (guest mode has no DB).
+function loadSaved() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY))
+    if (parsed && Array.isArray(parsed.messages)) {
+      return parsed
+    }
+  } catch {
+    // no/invalid saved state - start fresh
+  }
+  return null
+}
+
 export default function ChatBox() {
   const { token } = useAuth()
-  const [messages, setMessages] = useState([])
+  const saved = loadSaved()
+  const [messages, setMessages] = useState(saved?.messages ?? [])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const conversationId = useRef(crypto.randomUUID())
+  const conversationId = useRef(saved?.conversationId ?? crypto.randomUUID())
+
+  // Save after every change so the chat survives a reload or closing the tab.
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ conversationId: conversationId.current, messages }),
+      )
+    } catch {
+      // storage blocked (private mode) or full - not fatal
+    }
+  }, [messages])
+
+  function clearChat() {
+    setMessages([])
+    setError('')
+    conversationId.current = crypto.randomUUID()
+    try {
+      localStorage.removeItem(STORAGE_KEY)
+    } catch {
+      // ignore
+    }
+  }
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -27,7 +66,7 @@ export default function ChatBox() {
       const data = await askQuestion(question, conversationId.current, token)
       setMessages((prev) => [
         ...prev,
-        { role: 'assistant', content: data.answer, sources: data.sources },
+        { role: 'assistant', content: data.answer },
       ])
     } catch (err) {
       setError(err.message)
@@ -60,6 +99,11 @@ export default function ChatBox() {
         <button type="submit" disabled={loading}>
           Send
         </button>
+        {messages.length > 0 && (
+          <button type="button" onClick={clearChat} disabled={loading}>
+            Clear
+          </button>
+        )}
       </form>
     </div>
   )

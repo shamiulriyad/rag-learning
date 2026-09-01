@@ -21,6 +21,10 @@ langchain-google-genai>=2.1.0
 langchain-qdrant>=0.2.0
 qdrant-client>=1.9.0
 
+# ---- HTTP API (main.py - the service the .NET backend calls) ----
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+
 # ---- Utils ----
 python-dotenv>=1.0.0
 tqdm>=4.66.0

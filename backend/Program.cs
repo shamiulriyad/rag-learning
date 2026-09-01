@@ -13,7 +13,22 @@ builder.Services.AddOpenApi();
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
-        policy.WithOrigins(frontendUrl).AllowAnyHeader().AllowAnyMethod());
+    {
+        policy.AllowAnyHeader().AllowAnyMethod();
+
+        if (builder.Environment.IsDevelopment())
+        {
+            // Vite hops to the next free port (5173 -> 5174 -> ...), so accept any
+            // localhost origin while developing. Locked to FRONTEND_URL otherwise.
+            policy.SetIsOriginAllowed(origin =>
+                Uri.TryCreate(origin, UriKind.Absolute, out var uri) &&
+                (uri.Host == "localhost" || uri.Host == "127.0.0.1"));
+        }
+        else
+        {
+            policy.WithOrigins(frontendUrl);
+        }
+    });
 });
 
 builder.Services.AddHttpClient<RagService>(client =>

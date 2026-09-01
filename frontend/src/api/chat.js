@@ -1,12 +1,14 @@
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:5000'
 
 export async function askQuestion(question, conversationId, token) {
+  const headers = { 'Content-Type': 'application/json' }
+  if (token) {
+    headers.Authorization = `Bearer ${token}`
+  }
+
   const res = await fetch(`${API_URL}/api/chat`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
+    headers,
     body: JSON.stringify({ question, conversationId }),
   })
 
