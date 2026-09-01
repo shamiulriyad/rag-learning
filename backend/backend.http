@@ -1,0 +1,16 @@
+@backend_HostAddress = http://localhost:5000
+
+GET {{backend_HostAddress}}/api/health
+Accept: application/json
+
+###
+
+POST {{backend_HostAddress}}/api/chat
+Content-Type: application/json
+
+{
+  "question": "What is the difference between 'a' and 'an'?",
+  "conversationId": null
+}
+
+###

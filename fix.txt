@@ -1,0 +1,375 @@
+Fix the PDF text extraction bug in my existing Python RAG project.
+
+### Current status
+
+The BGE-M3 embedding migration is already working successfully.
+
+Current pipeline output:
+
+```text
+Extracted: 488 pages, 1,021,449 characters
+Cleaned: 481 pages kept
+Chunked: 482 chunks
+Embedding: BAAI/bge-m3 (local)
+Vector size: 1024
+Qdrant: 482 vectors stored
+```
+
+BGE-M3 and Qdrant are NOT the current problem.
+
+### Actual bug
+
+When I run:
+
+```powershell
+python ask.py "What is a noun?"
+```
+
+Qdrant retrieves chunks containing corrupted/garbage text such as:
+
+```text
+& ? ! & & ? !
+! * * ! * ; ! * ;
+, , !# A0 & H $0
+& & & & G & ; & G
+```
+
+instead of actual English grammar text.
+
+As a result, semantic retrieval is poor and Gemini responds:
+
+```text
+The document does not cover it.
+```
+
+This indicates that the **PDF text extraction/parsing stage is corrupting the PDF's text**, likely because of font encoding/mapping issues.
+
+---
+
+## Goal
+
+Fix the PDF extraction stage so that the actual English text from the PDF is preserved correctly.
+
+The target pipeline must become:
+
+```text
+PDF
+ ↓
+Correct text extraction
+ ↓
+Real English text
+ ↓
+Cleaning
+ ↓
+Chunking
+ ↓
+BGE-M3
+ ↓
+1024-dimensional vectors
+ ↓
+Qdrant
+ ↓
+Relevant retrieval
+ ↓
+Gemini
+ ↓
+Correct answer
+```
+
+---
+
+## Important: inspect before changing
+
+First inspect the existing project and identify exactly which file/function performs:
+
+* PDF loading
+* PDF page text extraction
+* text cleaning
+* chunking
+
+Do NOT blindly rewrite the entire RAG system.
+
+Do NOT change:
+
+* BGE-M3 configuration
+* Qdrant architecture
+* Gemini LLM answer generation
+* chunking strategy unless necessary
+* frontend/backend code
+
+Only fix the extraction/parsing problem.
+
+---
+
+## Diagnose the PDF first
+
+Use the actual PDF already configured by the project:
+
+```text
+-Free-English-Grammar.pdf
+```
+
+Test several pages, including pages that currently produce garbage retrieval.
+
+Compare at least these extraction methods if necessary:
+
+1. PyMuPDF / `fitz`
+2. `page.get_text("text")`
+3. `page.get_text("blocks")`
+4. PyPDF / pypdf
+5. pdfplumber
+
+For example, test:
+
+```python
+import fitz
+
+doc = fitz.open(PDF_PATH)
+
+for page_number in [0, 1, 10, 100, 400]:
+    text = doc[page_number].get_text("text")
+    print(f"\n--- PAGE {page_number + 1} ---")
+    print(text[:2000])
+```
+
+Determine whether the corruption already exists immediately after extraction.
+
+Do NOT assume the problem is BGE-M3.
+
+---
+
+## Handle font encoding problems
+
+If the PDF uses embedded/custom fonts with broken Unicode mappings, investigate whether the extracted text contains:
+
+* replacement characters
+* excessive symbols
+* random punctuation
+* meaningless character mappings
+* extremely low percentage of alphabetic English characters
+
+Add a validation step after extraction.
+
+For example, calculate a rough text-quality score based on:
+
+* alphabetic character ratio
+* printable character ratio
+* English word ratio
+* excessive symbol ratio
+
+Do NOT silently accept pages where extracted text is clearly corrupted.
+
+---
+
+## Fallback extraction
+
+If the primary PDF extractor produces corrupted text, implement a robust fallback strategy.
+
+Possible approach:
+
+```text
+Primary extraction
+       ↓
+Validate extracted text
+       ↓
+Is text readable?
+   ┌───┴───┐
+   YES     NO
+    ↓       ↓
+ Continue   fallback extraction
+```
+
+Try the most reliable available extractor for this PDF.
+
+If the PDF has no usable text layer at all, consider OCR as a fallback.
+
+However, do NOT introduce OCR unnecessarily if the PDF already contains a valid text layer.
+
+---
+
+## Very important: preserve page numbers
+
+The RAG system currently stores page metadata.
+
+Keep page numbers accurate so retrieval still produces:
+
+```text
+page 123
+page 456
+```
+
+etc.
+
+Do not break the existing metadata structure.
+
+---
+
+## Validate extracted content
+
+After fixing extraction, print sample pages before chunking.
+
+The output should look like actual English grammar text, for example:
+
+```text
+A noun is the name of a person, place, thing, or idea...
+```
+
+and NOT:
+
+```text
+& ? ! & & ? !
+! * * ! * ;
+```
+
+Also calculate and print something like:
+
+```text
+Extraction quality:
+Pages processed: 488
+Readable pages: ...
+Corrupted pages: ...
+Characters extracted: ...
+```
+
+---
+
+## Re-ingestion
+
+After fixing extraction, run:
+
+```powershell
+python ingest.py --recreate
+```
+
+Expected:
+
+```text
+[4] Chunked: approximately 482 chunks
+[5] Embedding: BAAI/bge-m3 (local)
+    vector size: 1024
+...
+stored .../... chunks
+[6] Qdrant: collection 'pdf_rag' now holds ... vectors
+```
+
+The exact number of chunks may change if the corrected text has different lengths. Do NOT force it to remain exactly 482.
+
+---
+
+## Test retrieval
+
+Then run:
+
+```powershell
+python ask.py "What is a noun?"
+```
+
+The retrieved previews must contain real English grammar content.
+
+For example, sources should look conceptually like:
+
+```text
+S1 page XX | A noun is...
+S2 page XX | Nouns are...
+```
+
+They must NOT look like:
+
+```text
+& ? ! & ...
+! * ; ! ...
+```
+
+Also test:
+
+```powershell
+python ask.py "What is a verb?"
+python ask.py "What is an adjective?"
+python ask.py "What is a pronoun?"
+```
+
+Verify that the retrieved chunks are semantically relevant.
+
+---
+
+## Keep BGE-M3 unchanged
+
+The current working embedding configuration is:
+
+```env
+EMBEDDING_MODEL=BAAI/bge-m3
+EMBEDDING_DIM=1024
+```
+
+Keep it.
+
+Do not switch back to:
+
+```text
+models/text-embedding-004
+```
+
+or:
+
+```text
+models/gemini-embedding-001
+```
+
+Do not use Gemini for embeddings.
+
+---
+
+## Keep Qdrant unchanged
+
+The collection should remain:
+
+```text
+pdf_rag
+dimension = 1024
+distance = COSINE
+```
+
+Use:
+
+```python
+VectorParams(
+    size=1024,
+    distance=Distance.COSINE
+)
+```
+
+Recreate the collection after extraction is fixed so it contains only vectors generated from the corrected text.
+
+---
+
+## Important constraints
+
+* Fix the root cause, not just the retrieval threshold.
+* Do NOT solve the problem by lowering/increasing similarity thresholds.
+* Do NOT tell Gemini to "guess" the answer.
+* Do NOT manually hardcode answers such as "A noun is..."
+* Do NOT replace the PDF with another source.
+* Do NOT change the BGE-M3 model.
+* Do NOT mix old corrupted vectors with new vectors.
+* Preserve page metadata.
+* Preserve the existing RAG architecture.
+* Keep the implementation simple and maintainable.
+
+### Final verification
+
+After making changes, show:
+
+1. Which file/function caused the extraction problem.
+2. What extraction method was changed.
+3. A before/after extraction sample.
+4. Number of readable vs corrupted pages.
+5. Number of chunks after re-ingestion.
+6. BGE-M3 vector dimension.
+7. Qdrant vector count.
+8. Retrieval results for:
+
+   * `What is a noun?`
+   * `What is a verb?`
+   * `What is an adjective?`
+
+Do not declare the issue fixed until the retrieved chunk previews contain actual readable English text rather than corrupted symbols.

@@ -1,0 +1,40 @@
+# ---- Secrets ----
+.env
+*.env
+!*.env.example
+
+# ---- Node / Frontend ----
+node_modules/
+dist/
+dist-ssr/
+*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---- .NET / Backend ----
+bin/
+obj/
+*.user
+
+# ---- Supabase CLI ----
+supabase/.temp/
+supabase/.branches/
+
+# ---- Python / RAG ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.pytest_cache/
+rag/qdrant_storage/
+
+# ---- Editors / OS ----
+.vs/
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
