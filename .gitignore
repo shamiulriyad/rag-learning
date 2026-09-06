@@ -33,6 +33,7 @@ rag/qdrant_storage/
 
 # ---- Personal / scratch ----
 linkdin.txt
+fix.txt
 
 # ---- Editors / OS ----
 .vs/
