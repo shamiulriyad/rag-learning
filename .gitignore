@@ -31,6 +31,9 @@ env/
 .pytest_cache/
 rag/qdrant_storage/
 
+# ---- Personal / scratch ----
+linkdin.txt
+
 # ---- Editors / OS ----
 .vs/
 .vscode/*

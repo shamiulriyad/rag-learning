@@ -4,6 +4,8 @@ An AI-powered English learning assistant. Ask questions about an English grammar
 book and get answers with page references, generated from the book's own content
 via Retrieval-Augmented Generation.
 
+![English Learning RAG chat UI showing a question and a grounded answer with a page citation](docs/webapp-screenshot.png)
+
 ## Tech Stack
 
 | Layer            | Technology                        |
