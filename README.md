@@ -19,6 +19,8 @@ via Retrieval-Augmented Generation.
 
 ## Architecture
 
+![System architecture diagram: React calls ASP.NET Core, which calls the FastAPI RAG service; the RAG service searches Qdrant and calls Gemini; ASP.NET Core also verifies auth and writes chat history to Supabase; a separate offline pipeline embeds the PDF into Qdrant](docs/rag-architecture-diagram.png)
+
 ```text
 React  ->  ASP.NET Core  ->  Python FastAPI RAG  ->  Qdrant   (vector search)
                                                  ->  Gemini   (answer generation)
