@@ -10,9 +10,6 @@ optional FastAPI service, or through an optional Streamlit test UI.
 
 ![Pipeline: ingest (load, extract, clean, chunk, embed, store in Qdrant) and query (question, embed, retrieve, Gemini, answer with sources); CLI, FastAPI and Streamlit all call the same Pipeline](docs/architecture.svg)
 
-> The `frontend/`, `backend/`, `supabase/` and `files/` folders belong to the
-> retired web app and are scheduled for removal. Nothing in the toolkit uses them.
-
 ## What it does
 
 | Step | Module | Notes |

@@ -1,6 +1,0 @@
-# Minimal Supabase CLI config. Only used to mark this folder as a project
-# and to target the right remote project for `supabase db push`.
-project_id = "logahclvylgznosacgfq"
-
-[db]
-major_version = 15

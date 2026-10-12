@@ -3,6 +3,10 @@
 *.env
 !*.env.example
 
+# ---- Legacy web app (Node / .NET / Supabase CLI) ----
+# The frontend/, backend/ and supabase/ code was removed, but local build output
+# may still exist on disk. Drop these three sections once those folders are gone.
+
 # ---- Node / Frontend ----
 node_modules/
 dist/
