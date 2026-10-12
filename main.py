@@ -1,45 +1,38 @@
-"""STEP 7-11 over HTTP - the RAG service the .NET backend talks to.
+"""Optional HTTP API over the pipeline (steps 7-11).
 
-    uvicorn main:app --port 8000          # run from this folder
+    pip install -r requirements-api.txt
+    python cli.py serve                    # or: uvicorn main:app --port 8000
 
-`backend/Services/RagService.cs` calls exactly two endpoints:
+    GET  /health                     -> {"status": "ok", "ready": bool}
+    POST /query  {question, top_k?}  -> {"answer": str, "status": str,
+                                         "sources": [{page, source, score, marker, ...}]}
 
-    GET  /health                     -> {"status": "ok"}
-    POST /query  {question, top_k?}  -> {"answer": str,
-                                         "sources": [{page, source, score}]}
+`answer` has the [S1] markers stripped; each source carries its `marker` so a
+client can still map claims to chunks. `status` is "answered" or "no_results".
 
-Qdrant runs embedded (QDRANT_PATH in .env), which allows only one process at a
-time - run `python ingest.py` first, then start this with a single worker.
+Qdrant in local mode allows only one process at a time - run ingestion first,
+then start this with a single worker.
 """
 
-import re
+import os
 from contextlib import asynccontextmanager
 from typing import List, Optional
 
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from fastapi import Depends, FastAPI, HTTPException
+from pydantic import BaseModel, Field
 
-import config
-from rag.step05_embedding import get_embeddings
-from rag.step06_vector_store import get_vector_store
-from rag.step08_query_embedding import embed_question
-from rag.step09_retrieve import retrieve
-from rag.step10_generate import generate_answer, get_llm
+from rag.errors import RagError
+from rag.pipeline import Pipeline
+from rag.step11_answer import strip_markers  # noqa: F401 - re-exported for callers
 
-# The embedding model, Qdrant client and LLM are built once and reused for every
-# request. Kept in a dict so the lifespan handler and the lazy fallback share it.
-_state: dict = {}
+_pipeline: Optional[Pipeline] = None
 
 
-def _ensure_ready() -> None:
-    """Load models / open Qdrant on first use. Safe to call repeatedly."""
-    if _state.get("ready"):
-        return
-    embeddings = get_embeddings()                       # step 5 (read side)
-    _state["embeddings"] = embeddings
-    _state["vector_store"] = get_vector_store(embeddings)  # step 6 (read side)
-    _state["llm"] = get_llm()                           # step 10
-    _state["ready"] = True
+def get_pipeline() -> Pipeline:
+    global _pipeline
+    if _pipeline is None:
+        _pipeline = Pipeline()
+    return _pipeline
 
 
 @asynccontextmanager
@@ -47,72 +40,60 @@ async def lifespan(_app: FastAPI):
     # Warm up at startup so the first real request is fast. If it fails (e.g. the
     # collection has not been ingested yet) the service still starts and /health
     # stays green; /query then returns a clear 503.
-    try:
-        _ensure_ready()
-    except Exception as exc:  # noqa: BLE001 - reported back on /query
-        print(f"[startup] not ready yet: {exc}")
+    if os.getenv("RAG_API_WARMUP", "1") == "1":
+        try:
+            get_pipeline().warm_up()
+        except Exception as exc:  # noqa: BLE001 - reported back on /query
+            print(f"[startup] not ready yet: {exc}")
     yield
-    _state.clear()
+    if _pipeline is not None:
+        _pipeline.close()
 
 
-app = FastAPI(title="PDF RAG service", lifespan=lifespan)
+app = FastAPI(title="RAG toolkit service", lifespan=lifespan)
 
 
 class QueryIn(BaseModel):
     question: str
-    top_k: Optional[int] = None
+    top_k: Optional[int] = Field(default=None, ge=1, le=50)
 
 
 class SourceOut(BaseModel):
     page: Optional[int] = None
     source: str
     score: float
+    marker: str
+    chunk_id: Optional[int] = None
+    text: str
 
 
 class AnswerOut(BaseModel):
     answer: str
+    status: str
     sources: List[SourceOut]
-
-
-# Gemini tags claims with [S1], [S2]... (sometimes back-to-back) - strip them.
-_MARKER_RE = re.compile(r"[ \t]*(?:\[S\d+\])+")
-
-
-def strip_markers(text: str) -> str:
-    return _MARKER_RE.sub("", text).strip()
 
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "ready": bool(_state.get("ready"))}
+    return {"status": "ok", "ready": _pipeline is not None and _pipeline.ready}
 
 
 @app.post("/query", response_model=AnswerOut)
-def query(body: QueryIn) -> AnswerOut:
-    question = body.question.strip()
-    if not question:
+def query(body: QueryIn, pipeline: Pipeline = Depends(get_pipeline)) -> AnswerOut:
+    if not body.question.strip():
         raise HTTPException(status_code=400, detail="question is required")
 
     try:
-        _ensure_ready()
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(
-            status_code=503,
-            detail=f"RAG service not ready: {exc}. Run `python ingest.py` first.",
-        ) from exc
+        result = pipeline.ask(body.question, k=body.top_k)
+    except RagError as exc:
+        raise HTTPException(status_code=503, detail=f"RAG service not ready: {exc}") from exc
 
-    k = body.top_k or config.TOP_K
-    query_vector = embed_question(_state["embeddings"], question)          # 8
-    scored_docs = retrieve(_state["vector_store"], query_vector, k)        # 9
-    answer = generate_answer(question, scored_docs, llm=_state["llm"])     # 10
-    answer = strip_markers(answer)
-
-    sources = [                                                           # 11
-        SourceOut(
-            page=doc.metadata.get("page_number"),
-            source=doc.metadata.get("source_file", "document"),
-            score=float(score),
-        )
-        for doc, score in scored_docs
-    ]
-    return AnswerOut(answer=answer, sources=sources)
+    return AnswerOut(
+        answer=result.answer_without_markers,
+        status=result.status,
+        sources=[
+            SourceOut(page=s["page"], source=s["file"] or "document", score=s["score"],
+                      marker=s["marker"], chunk_id=s["chunk_id"], text=s["text"])
+            for s in result.sources
+        ],
+    )

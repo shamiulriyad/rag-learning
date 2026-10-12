@@ -9,19 +9,37 @@ Two providers, chosen by EMBEDDING_PROVIDER in .env:
 """
 
 import config
+from rag.errors import EmbeddingProviderError
 
 
 def get_embeddings():
+    config.validate()
     if config.EMBEDDING_PROVIDER == "huggingface":
-        from langchain_huggingface import HuggingFaceEmbeddings
-
-        embeddings = HuggingFaceEmbeddings(model_name=config.EMBEDDING_MODEL)
+        try:
+            from langchain_huggingface import HuggingFaceEmbeddings
+        except ImportError as exc:
+            raise EmbeddingProviderError(
+                "EMBEDDING_PROVIDER=huggingface needs `pip install langchain-huggingface "
+                f"sentence-transformers` ({exc})."
+            ) from exc
+        try:
+            embeddings = HuggingFaceEmbeddings(model_name=config.EMBEDDING_MODEL)
+        except Exception as exc:
+            raise EmbeddingProviderError(
+                f"Could not load embedding model {config.EMBEDDING_MODEL!r}: {exc}. "
+                "Check the model name and your network (the first run downloads it "
+                "into the Hugging Face cache)."
+            ) from exc
         print(f"[5] Embedding  : {config.EMBEDDING_MODEL} (local)")
         return embeddings
 
-    from langchain_google_genai import GoogleGenerativeAIEmbeddings
+    try:
+        from langchain_google_genai import GoogleGenerativeAIEmbeddings
+    except ImportError as exc:
+        raise EmbeddingProviderError(
+            f"EMBEDDING_PROVIDER=google needs `pip install langchain-google-genai` ({exc})."
+        ) from exc
 
-    config.require_api_key()
     embeddings = GoogleGenerativeAIEmbeddings(
         model=config.EMBEDDING_MODEL,
         google_api_key=config.GOOGLE_API_KEY,
@@ -40,6 +58,11 @@ def detect_dimension(embeddings) -> int:
     if config.EMBEDDING_DIM:
         return config.EMBEDDING_DIM
 
-    dim = len(embeddings.embed_query("dimension probe"))
+    try:
+        dim = len(embeddings.embed_query("dimension probe"))
+    except Exception as exc:
+        raise EmbeddingProviderError(
+            f"Embedding model {config.EMBEDDING_MODEL!r} failed on a test input: {exc}"
+        ) from exc
     print(f"    vector size: {dim}")
     return dim

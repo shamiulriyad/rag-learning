@@ -13,8 +13,11 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 import config
+from rag.errors import GenerationError
 
-SYSTEM_PROMPT = """You answer questions about a PDF document.
+NO_RESULTS_ANSWER = "Nothing relevant was retrieved from the documents for this question."
+
+SYSTEM_PROMPT = """You answer questions about a set of documents.
 
 Rules:
 - Use ONLY the context below. Do not add outside knowledge.
@@ -42,21 +45,28 @@ def get_llm() -> ChatGoogleGenerativeAI:
 def format_context(scored_docs: List[Tuple[Document, float]]) -> str:
     blocks = []
     for i, (doc, _score) in enumerate(scored_docs, start=1):
-        page = doc.metadata.get("page_number", "?")
+        page = doc.metadata.get("page_number")
         source = doc.metadata.get("source_file", "document")
-        blocks.append(f"[S{i}] ({source}, page {page})\n{doc.page_content}")
+        where = f"{source}, page {page}" if page else source
+        blocks.append(f"[S{i}] ({where})\n{doc.page_content}")
     return "\n\n---\n\n".join(blocks)
 
 
 def generate_answer(question: str, scored_docs: List[Tuple[Document, float]], llm=None) -> str:
     if not scored_docs:
-        return "Nothing was retrieved from the document for this question."
+        return NO_RESULTS_ANSWER
 
     chain = PROMPT | (llm or get_llm()) | StrOutputParser()
-    answer = chain.invoke({
-        "context": format_context(scored_docs),
-        "question": question,
-    })
+    try:
+        answer = chain.invoke({
+            "context": format_context(scored_docs),
+            "question": question,
+        })
+    except Exception as exc:
+        raise GenerationError(
+            f"{config.LLM_MODEL} could not answer: {exc}. Check GOOGLE_API_KEY, the "
+            "LLM_MODEL name and your quota (HTTP 429 means rate-limited; wait and retry)."
+        ) from exc
 
     print(f"[10] Gemini    : {config.LLM_MODEL} answered")
     return answer.strip()
