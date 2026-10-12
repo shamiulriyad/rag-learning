@@ -1,0 +1,4 @@
+# Optional FastAPI service: python cli.py serve
+-r requirements.txt
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
