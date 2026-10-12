@@ -4,7 +4,7 @@
     python cli.py ingest FILE [FILE ...]      steps 1-6 (re-ingesting replaces)
     python cli.py ask "question"              steps 7-11 (no question = interactive)
     python cli.py search "question"           retrieval only, no LLM call
-    python cli.py documents                   files in the collection + chunk counts
+    python cli.py documents [--json]          files in the collection + chunk counts
     python cli.py delete FILE_NAME            remove one document's chunks
     python cli.py serve                       FastAPI service (needs requirements-api.txt)
     python cli.py ui                          Streamlit test UI (needs requirements-ui.txt)
@@ -15,8 +15,11 @@ Every command takes --collection to work on something other than COLLECTION_NAME
 
 import argparse
 import contextlib
+import importlib.metadata
 import importlib.util
 import json
+import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -40,6 +43,61 @@ def _quiet(args):
 
 
 # --- check -------------------------------------------------------------------
+# The requirements files are the single source of truth for dependencies.
+REQUIREMENT_FILES = {
+    "requirements.txt": ("core", True),
+    "requirements-api.txt": ("optional: serve", False),
+    "requirements-ui.txt": ("optional: ui", False),
+    "requirements-dev.txt": ("optional: tests", False),
+}
+_REQUIREMENT_NAME = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
+
+
+def requirement_names(path: Path) -> list:
+    """Distribution names listed in a requirements file, in order.
+
+    Skips comments and option lines such as `-r other.txt` (an included file is
+    checked under its own entry in REQUIREMENT_FILES).
+    """
+    names = []
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line or line.startswith("-"):
+            continue
+        match = _REQUIREMENT_NAME.match(line)
+        if match:
+            names.append(match.group(1))
+    return names
+
+
+def _canonical(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def dependency_report(root: Path = ROOT):
+    """(all required installed?, [(status, name, detail), ...])."""
+    ok, rows, seen = True, [], set()
+    for file, (purpose, required) in REQUIREMENT_FILES.items():
+        path = root / file
+        if not path.exists():
+            ok = ok and not required
+            rows.append(("FAIL" if required else "warn", file, "requirements file not found"))
+            continue
+        for name in requirement_names(path):
+            if _canonical(name) in seen:
+                continue
+            seen.add(_canonical(name))
+            try:
+                version = importlib.metadata.version(name)
+            except importlib.metadata.PackageNotFoundError:
+                ok = ok and not required
+                rows.append(("FAIL" if required else "--", name,
+                             f"not installed ({purpose}): pip install -r {file}"))
+            else:
+                rows.append(("ok", name, f"{version} ({purpose})"))
+    return ok, rows
+
+
 def cmd_check(args) -> int:
     ok = True
 
@@ -62,19 +120,10 @@ def cmd_check(args) -> int:
     line("info", "llm", config.LLM_MODEL)
     line("info", "pdf font repair", "on" if config.PDF_FONT_REPAIR else "off")
 
-    modules = {"pymupdf": "core", "langchain_qdrant": "core", "langchain_google_genai": "core",
-               "langchain_huggingface": "huggingface embeddings",
-               "sentence_transformers": "huggingface embeddings",
-               "fastapi": "optional: serve", "uvicorn": "optional: serve",
-               "streamlit": "optional: ui", "pytest": "optional: tests"}
-    for module, purpose in modules.items():
-        found = importlib.util.find_spec(module) is not None
-        required = purpose == "core" or (purpose.startswith("huggingface")
-                                         and config.EMBEDDING_PROVIDER == "huggingface")
-        if not found and required:
-            ok = False
-        line("ok" if found else ("FAIL" if required else "--"), module,
-             purpose if found else f"not installed ({purpose})")
+    deps_ok, rows = dependency_report()
+    ok = ok and deps_ok
+    for row in rows:
+        line(*row)
 
     from rag.step06_vector_store import (collection_dimension, collection_exists,
                                          describe_location, get_client)
@@ -218,9 +267,18 @@ def cmd_search(args) -> int:
 def cmd_documents(args) -> int:
     pipeline = _pipeline(args)
     try:
-        docs = pipeline.documents()
+        with _quiet(args):
+            docs = pipeline.documents()
     finally:
         pipeline.close()
+    if args.json:
+        # Stable schema, documented in the README.
+        print(json.dumps({
+            "collection": pipeline.collection,
+            "total_chunks": sum(docs.values()),
+            "documents": [{"file": name, "chunks": count} for name, count in docs.items()],
+        }, ensure_ascii=False, indent=2))
+        return 0
     print(f"Collection '{pipeline.collection}': {sum(docs.values())} chunks, {len(docs)} file(s)")
     for name, count in docs.items():
         print(f"  {count:6}  {name}")
@@ -254,24 +312,35 @@ def _require(module: str, requirements: str) -> bool:
     return True
 
 
+def _child_env(args, what: str):
+    """Environment for the server process. --collection overrides COLLECTION_NAME for
+    that process only (environment variables win over .env); .env is never edited."""
+    collection = args.collection or config.COLLECTION_NAME
+    source = "--collection" if args.collection else "COLLECTION_NAME"
+    print(f"{what} collection '{collection}' (from {source})", flush=True)
+    if not args.collection:
+        return None  # inherit unchanged
+    return {**os.environ, "COLLECTION_NAME": args.collection}
+
+
 def cmd_serve(args) -> int:
     if not (_require("fastapi", "requirements-api.txt") and
             _require("uvicorn", "requirements-api.txt")):
         return 1
-    if args.collection:
-        print("note: --collection is ignored by `serve`; set COLLECTION_NAME instead.")
+    env = _child_env(args, "Serving")
     # One worker: embedded Qdrant allows a single process.
     return subprocess.call([sys.executable, "-m", "uvicorn", "main:app", "--app-dir", str(ROOT),
-                            "--host", args.host, "--port", str(args.port), "--workers", "1"])
+                            "--host", args.host, "--port", str(args.port), "--workers", "1"],
+                           env=env)
 
 
 def cmd_ui(args) -> int:
     if not _require("streamlit", "requirements-ui.txt"):
         return 1
-    if args.collection:
-        print("note: --collection is ignored by `ui`; pick the collection in the sidebar.")
+    env = _child_env(args, "UI starts on")
     return subprocess.call([sys.executable, "-m", "streamlit", "run",
-                            str(ROOT / "streamlit_app.py"), "--server.port", str(args.port)])
+                            str(ROOT / "streamlit_app.py"), "--server.port", str(args.port)],
+                           env=env)
 
 
 # --- argument parsing --------------------------------------------------------
@@ -311,6 +380,7 @@ def build_parser() -> argparse.ArgumentParser:
         p.set_defaults(func=func)
 
     p = sub.add_parser("documents", parents=[common], help="list indexed files")
+    p.add_argument("--json", action="store_true", help="machine-readable output")
     p.set_defaults(func=cmd_documents)
 
     p = sub.add_parser("delete", parents=[common], help="remove one file's chunks")

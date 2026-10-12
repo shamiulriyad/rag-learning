@@ -59,7 +59,7 @@ pip install -r requirements-dev.txt   # tests (includes the API extra)
 
 ```bash
 cp .env.example .env              # then set GOOGLE_API_KEY
-python cli.py check               # settings, dependencies, vector store
+python cli.py check               # settings, vector store, and every package in requirements*.txt
 python cli.py check --deep        # also loads the embedding model, compares dimensions
 ```
 
@@ -103,7 +103,9 @@ python cli.py ingest scanned-font.pdf --font-repair on
   any older ones with the same file name, so nothing is duplicated. Two
   different files with the same name in one collection count as one document.
 - **Delete one document:** `python cli.py delete report.pdf` (asks first; `-y` to skip).
-- **List documents:** `python cli.py documents`.
+- **List documents:** `python cli.py documents`, or `--json` for
+  `{"collection": str, "total_chunks": int, "documents": [{"file": str, "chunks": int}]}`
+  (stable schema; files sorted by name).
 - **Start over:** `python cli.py ingest file.pdf --recreate` drops the whole
   collection first. Needed after changing the embedding model.
 
@@ -139,7 +141,12 @@ progress goes to stderr and stdout holds only the JSON.
 ```bash
 pip install -r requirements-api.txt
 python cli.py serve --port 8000            # or: uvicorn main:app --port 8000
+python cli.py serve --collection experiments
 ```
+
+`--collection` (also on `ui`) applies to that server process only; without it
+the server uses `COLLECTION_NAME`. The command prints which collection it uses,
+and `.env` is never modified.
 
 - `GET /health` → `{"status": "ok", "ready": true}`
 - `POST /query` with `{"question": "...", "top_k": 4}` →

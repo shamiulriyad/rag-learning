@@ -101,6 +101,106 @@ def test_json_mode_keeps_stdout_pure(monkeypatch, capsys):
     assert "[9] Retrieved" in captured.err
 
 
+# --- dependency check: derived from the requirements files ---------------------
+
+
+def test_requirement_names_parses_real_world_lines(tmp_path):
+    req = tmp_path / "requirements.txt"
+    req.write_text("# comment\n-r base.txt\n\nuvicorn[standard]>=0.30.0\n"
+                   "langchain-core>=0.3.0  # inline\nqdrant_client==1.9\n", encoding="utf-8")
+    assert cli.requirement_names(req) == ["uvicorn", "langchain-core", "qdrant_client"]
+
+
+def test_dependency_report_covers_every_requirements_file():
+    _ok, rows = cli.dependency_report()
+    names = {name for _status, name, _detail in rows}
+    for file in cli.REQUIREMENT_FILES:
+        for name in cli.requirement_names(ROOT / file):
+            assert name in names, f"{name} from {file} is not checked"
+
+
+def _fake_project(tmp_path, core, api=""):
+    (tmp_path / "requirements.txt").write_text(core, encoding="utf-8")
+    (tmp_path / "requirements-api.txt").write_text(f"-r requirements.txt\n{api}", encoding="utf-8")
+    (tmp_path / "requirements-ui.txt").write_text("", encoding="utf-8")
+    (tmp_path / "requirements-dev.txt").write_text("", encoding="utf-8")
+    return tmp_path
+
+
+def test_missing_core_dependency_fails(tmp_path):
+    root = _fake_project(tmp_path, "pytest\nno-such-package-xyz>=1\n")
+    ok, rows = cli.dependency_report(root)
+    assert not ok
+    assert ("FAIL", "no-such-package-xyz",
+            "not installed (core): pip install -r requirements.txt") in rows
+    assert rows[0][0] == "ok" and rows[0][1] == "pytest"
+
+
+def test_missing_optional_dependency_only_warns(tmp_path):
+    root = _fake_project(tmp_path, "pytest\n", api="no-such-package-xyz\n")
+    ok, rows = cli.dependency_report(root)
+    assert ok
+    assert ("--", "no-such-package-xyz",
+            "not installed (optional: serve): pip install -r requirements-api.txt") in rows
+
+
+# --- serve / ui honour --collection for the child process only ------------------
+
+
+@pytest.fixture
+def captured_launch(monkeypatch):
+    calls = []
+    monkeypatch.setattr(cli, "_require", lambda *a: True)
+    monkeypatch.setattr(cli.subprocess, "call",
+                        lambda cmd, env=None: calls.append((cmd, env)) or 0)
+    return calls
+
+
+@pytest.mark.parametrize("command", ["serve", "ui"])
+def test_server_commands_pass_collection_to_child_only(command, captured_launch, capsys):
+    before = os.environ.get("COLLECTION_NAME")
+    assert cli.main([command, "--collection", "experiments"]) == 0
+
+    [(cmd, env)] = captured_launch
+    assert env["COLLECTION_NAME"] == "experiments"
+    assert os.environ.get("COLLECTION_NAME") == before  # this process is untouched
+    assert cli.config.COLLECTION_NAME == "pdf_rag"
+    assert "collection 'experiments' (from --collection)" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("command", ["serve", "ui"])
+def test_server_commands_default_to_configured_collection(command, captured_launch, capsys):
+    assert cli.main([command]) == 0
+    [(cmd, env)] = captured_launch
+    assert env is None  # inherits the environment; .env decides
+    assert "collection 'pdf_rag' (from COLLECTION_NAME)" in capsys.readouterr().out
+
+
+# --- documents --json -------------------------------------------------------------
+
+
+def test_documents_json_schema(monkeypatch, capsys):
+    class TwoDocs:
+        collection = "pdf_rag"
+
+        def __init__(self, *a, **kw):
+            pass
+
+        def documents(self):
+            return {"a.pdf": 3, "b.md": 1}
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("rag.pipeline.Pipeline", TwoDocs)
+    assert cli.main(["documents", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "collection": "pdf_rag",
+        "total_chunks": 4,
+        "documents": [{"file": "a.pdf", "chunks": 3}, {"file": "b.md", "chunks": 1}],
+    }
+
+
 @pytest.mark.parametrize("command", ["check", "ingest", "ask", "search", "documents",
                                      "delete", "serve", "ui"])
 def test_every_documented_command_exists(command):

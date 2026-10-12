@@ -14,6 +14,7 @@ so the real store is never written to. Nothing here uses --recreate. Stop
 
 import json
 import os
+import re
 import subprocess
 import sys
 import uuid
@@ -92,4 +93,13 @@ def test_real_gemini_answer():
     body = json.loads(result.stdout)
     assert body["status"] == "answered"
     assert body["answer"].strip()
-    assert body["sources"]
+
+    # Source attribution: every [S#] marker in the answer maps to a returned
+    # source with a file and page, and at least one marker is present.
+    sources = {s["marker"]: s for s in body["sources"]}
+    assert len(sources) == 3
+    cited = set(re.findall(r"\[(S\d+)\]", body["answer"]))
+    assert cited, f"answer has no [S#] markers: {body['answer']!r}"
+    assert cited <= set(sources), f"answer cites unknown sources: {cited - set(sources)}"
+    for marker in cited:
+        assert sources[marker]["file"] and sources[marker]["page"]
