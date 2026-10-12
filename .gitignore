@@ -3,29 +3,6 @@
 *.env
 !*.env.example
 
-# ---- Legacy web app (Node / .NET / Supabase CLI) ----
-# The frontend/, backend/ and supabase/ code was removed, but local build output
-# may still exist on disk. Drop these three sections once those folders are gone.
-
-# ---- Node / Frontend ----
-node_modules/
-dist/
-dist-ssr/
-*.local
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-
-# ---- .NET / Backend ----
-bin/
-obj/
-*.user
-
-# ---- Supabase CLI ----
-supabase/.temp/
-supabase/.branches/
-
 # ---- Python / RAG ----
 __pycache__/
 *.py[cod]
