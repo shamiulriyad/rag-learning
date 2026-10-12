@@ -29,7 +29,15 @@ __pycache__/
 venv/
 env/
 .pytest_cache/
-rag/qdrant_storage/
+.ruff_cache/
+*.egg-info/
+
+# ---- Local RAG data (vector store, uploads, test collections) ----
+qdrant_data/
+qdrant_data_*/
+uploads/
+data/*
+!data/.gitkeep
 
 # ---- Personal / scratch ----
 linkdin.txt
