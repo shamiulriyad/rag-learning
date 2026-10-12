@@ -1,0 +1,26 @@
+# Core pipeline + CLI. Optional extras:
+#   requirements-api.txt   FastAPI service  (python cli.py serve)
+#   requirements-ui.txt    Streamlit UI     (python cli.py ui)
+#   requirements-dev.txt   tests
+# Supported: Python 3.11 and 3.12.
+
+# ---- LangChain building blocks ----
+langchain-core>=0.3.0
+langchain-text-splitters>=0.3.0
+
+# ---- Step 2: PDF text extraction (rag/pdf_font_repair.py is optional) ----
+pymupdf>=1.24.0
+
+# ---- Step 5: local embeddings (EMBEDDING_PROVIDER=huggingface, default) ----
+langchain-huggingface>=0.1.0
+sentence-transformers>=3.0.0
+
+# ---- Step 5 & 10: Gemini embeddings + Gemini LLM ----
+langchain-google-genai>=2.1.0
+
+# ---- Step 6: Qdrant vector store ----
+langchain-qdrant>=0.2.0
+qdrant-client>=1.9.0
+
+# ---- Utils ----
+python-dotenv>=1.0.0

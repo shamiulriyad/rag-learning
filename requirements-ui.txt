@@ -1,0 +1,3 @@
+# Optional Streamlit test UI: python cli.py ui
+-r requirements.txt
+streamlit>=1.40.0

@@ -1,218 +1,238 @@
-# English Learning RAG System
+# RAG Toolkit
 
-An AI-powered English learning assistant. Ask questions about an English grammar
-book and get answers with page references, generated from the book's own content
-via Retrieval-Augmented Generation.
+A small, readable Retrieval-Augmented Generation toolkit for developers. Index
+PDF, text and Markdown files into Qdrant, then ask questions and get answers
+that cite the chunks (and PDF page numbers) they came from.
 
-![English Learning RAG chat UI showing a question and a grounded answer with a page citation](docs/webapp-screenshot.png)
+Every pipeline step is its own module under [`rag/`](rag/), so you can read,
+test and swap each one. Use it from the command line, from Python, through an
+optional FastAPI service, or through an optional Streamlit test UI.
 
-## Tech Stack
+![Pipeline: ingest (load, extract, clean, chunk, embed, store in Qdrant) and query (question, embed, retrieve, Gemini, answer with sources); CLI, FastAPI and Streamlit all call the same Pipeline](docs/architecture.svg)
 
-| Layer            | Technology                        |
-| ---------------- | --------------------------------- |
-| Frontend         | React.js + Vite                   |
-| Backend API      | ASP.NET Core Web API (.NET 10)    |
-| RAG service      | Python + FastAPI                  |
-| LLM              | Google Gemini API                 |
-| Vector database  | Qdrant                            |
-| Relational DB    | Supabase PostgreSQL (optional)    |
+## What it does
 
-## Architecture
+| Step | Module | Notes |
+| ---- | ------ | ----- |
+| 1 Load | `step01_load_pdf.py` | `.pdf`, `.txt`, `.md`; validates before any work |
+| 2 Extract | `step02_extract_text.py` | one Document per PDF page; optional font repair |
+| 3 Clean | `step03_clean_text.py` | unwrap lines, join hyphenation, drop headers/footers |
+| 4 Chunk | `step04_chunking.py` | recursive splitter, overlap, `chunk_id` per document |
+| 5 Embed | `step05_embedding.py` | local Hugging Face model (default `BAAI/bge-m3`) or Gemini |
+| 6 Store | `step06_vector_store.py` | Qdrant, embedded on disk or a server |
+| 7–9 Retrieve | `step07`…`step09` | cosine search, optional minimum score |
+| 10 Generate | `step10_generate.py` | Gemini, context-only, tags claims `[S1]`, `[S2]`… |
+| 11 Answer | `step11_answer.py` | answer plus the sources behind each marker |
 
-![System architecture diagram: React calls ASP.NET Core, which calls the FastAPI RAG service; the RAG service searches Qdrant and calls Gemini; ASP.NET Core also verifies auth and writes chat history to Supabase; a separate offline pipeline embeds the PDF into Qdrant](docs/rag-architecture-diagram.png)
+[`rag/pipeline.py`](rag/pipeline.py) wires the steps together; the CLI, API and
+UI all use it. See [docs/pipeline.md](docs/pipeline.md) for per-step notes.
 
-```text
-React  ->  ASP.NET Core  ->  Python FastAPI RAG  ->  Qdrant   (vector search)
-                                                 ->  Gemini   (answer generation)
+## Prerequisites
 
-ASP.NET Core  ->  Supabase PostgreSQL  (users / conversations / messages / books)
-```
+- **Python 3.11 or 3.12.** Verified on 3.11.9. Python 3.13+ is not a supported
+  baseline yet (some dependencies lack prebuilt Windows wheels).
+- A **Gemini API key** for answer generation
+  ([get one](https://aistudio.google.com/app/apikey)). Retrieval and ingestion
+  with the default local embeddings need no key.
+- Disk space for the embedding model: `BAAI/bge-m3` is about 2.2 GB and is
+  downloaded to the Hugging Face cache on first use.
+- Optional: Docker, if you prefer a Qdrant server to the embedded store.
 
-- **Qdrant** stores only vector-search data: embeddings, book chunks, page
-  numbers, and source metadata.
-- **Supabase PostgreSQL** stores relational application data: users,
-  conversations, messages, books, chapters.
-
-## Project Structure
-
-```text
-english-learning-rag/
-├── frontend/     # React + Vite chat UI
-├── backend/      # ASP.NET Core Web API (talks to React + RAG + Supabase)
-├── rag/          # Python FastAPI: PDF -> chunks -> embeddings -> Qdrant + Gemini
-├── supabase/     # DB migrations + migrate script (Supabase CLI)
-├── .gitignore
-└── README.md
-```
-
-##  Rag Development Orde
-
-1. PDF
-   ↓
-2. Text Extraction
-   ↓
-3. Text Cleaning
-   ↓
-4. Chunking
-   ↓
-5. Embedding
-   ↓
-6. Qdrant-এ Store
-   ↓
-7. User Question
-   ↓
-8. Query Embedding
-   ↓
-9. Relevant Chunks Retrieve
-   ↓
-10. Gemini
-   ↓
-11. Answer + Source
-
-## Setup
-
-Copy every `.env.example` to `.env` and fill in the blanks. **Never commit `.env`
-files.**
-
-### 1. Qdrant (vector store)
-
-By default the RAG service runs Qdrant **embedded** (a local folder, no server or
-Docker). Nothing to start. `rag/.env` controls this:
-
-```env
-QDRANT_URL=local          # embedded, stored in rag/qdrant_storage/
-# QDRANT_URL=http://localhost:6333   # to use a real Qdrant server instead
-```
-
-Embedded mode allows only one process at a time — run `ingest.py` first, then the
-API. For a standalone server: `docker run -p 6333:6333 qdrant/qdrant`.
-
-### 2. RAG service (Python + FastAPI)
-
-> Use **Python 3.11 or 3.12**. Python 3.14 has no prebuilt wheels for some
-> dependencies on Windows and will try (and fail) to compile them.
+## Install
 
 ```bash
-cd rag
-py -3.11 -m venv .venv              # or: python3.11 -m venv .venv
-.venv\Scripts\activate            # Windows  (source .venv/bin/activate on macOS/Linux)
+py -3.11 -m venv .venv            # macOS/Linux: python3.11 -m venv .venv
+.venv\Scripts\activate            # macOS/Linux: source .venv/bin/activate
 python -m pip install -U pip
-pip install -r requirements.txt
-cp .env.example .env               # then set GEMINI_API_KEY
-python ingest.py                   # load data/english-book.pdf into Qdrant
-uvicorn main:app --reload --port 8000
+pip install -r requirements.txt   # core pipeline + CLI
+
+# optional extras
+pip install -r requirements-api.txt   # FastAPI service
+pip install -r requirements-ui.txt    # Streamlit test UI
+pip install -r requirements-dev.txt   # tests (includes the API extra)
 ```
 
-### 3. Backend (ASP.NET Core)
+## Configure
 
 ```bash
-cd backend
-cp .env.example .env               # set RAG_SERVICE_URL and (optionally) Supabase keys
-dotnet run
+cp .env.example .env              # then set GOOGLE_API_KEY
+python cli.py check               # settings, vector store, and every package in requirements*.txt
+python cli.py check --deep        # also loads the embedding model, compares dimensions
 ```
 
-API runs on `http://localhost:5000` (`POST /api/chat`, `GET /api/health`).
+`.env` is always read from the project folder, and relative paths in it
+(`QDRANT_PATH`, `PDF_PATH`) are resolved from the project folder too, so
+commands behave the same from any working directory.
 
-### 4. Frontend (React + Vite)
+| Variable | Default | Purpose |
+| -------- | ------- | ------- |
+| `GOOGLE_API_KEY` | – | Gemini key (generation; embeddings if provider is `google`) |
+| `LLM_MODEL` | `gemini-2.5-flash` | Gemini model for answers |
+| `TEMPERATURE` | `0.2` | LLM temperature |
+| `EMBEDDING_PROVIDER` | `huggingface` | `huggingface` (local) or `google` |
+| `EMBEDDING_MODEL` | `BAAI/bge-m3` | 1024-dim; `models/gemini-embedding-001` for `google` |
+| `EMBEDDING_DIM` | auto | set only to skip auto-detection |
+| `QDRANT_PATH` | – | embedded store folder, e.g. `qdrant_data` (wins over URL) |
+| `QDRANT_URL` / `QDRANT_API_KEY` | `http://localhost:6333` | Qdrant server |
+| `COLLECTION_NAME` | `pdf_rag` | collection to read and write |
+| `PDF_PATH` | `data/sample.pdf` | file for `ingest` with no arguments |
+| `PDF_FONT_REPAIR` | `false` | repair scrambled-glyph PDFs (see below) |
+| `CHUNK_SIZE` / `CHUNK_OVERLAP` | `1000` / `150` | chunking |
+| `TOP_K` | `4` | chunks per question |
+| `MIN_SCORE` | – | drop chunks below this cosine score |
+| `EMBED_BATCH_SIZE` / `EMBED_SLEEP` | `90` / `0` (`60` for google) | ingestion batching |
+
+A collection is tied to the embedding model that built it. If the model's
+dimension does not match the collection, every command stops with an error
+instead of writing incompatible vectors.
+
+## Ingest documents
 
 ```bash
-cd frontend
-npm install
-cp .env.example .env               # set VITE_API_URL + Supabase vars
-npm run dev
+python cli.py ingest data/book.pdf notes.md      # several files at once
+python cli.py ingest                             # PDF_PATH from .env
+python cli.py ingest report.pdf --collection experiments
+python cli.py ingest scanned-font.pdf --font-repair on
 ```
 
-Open the URL Vite prints (default `http://localhost:5173`).
+- **Re-ingesting replaces.** Chunks get IDs derived from file name, content
+  hash and position. Ingesting a file again overwrites its chunks and removes
+  any older ones with the same file name, so nothing is duplicated. Two
+  different files with the same name in one collection count as one document.
+- **Delete one document:** `python cli.py delete report.pdf` (asks first; `-y` to skip).
+- **List documents:** `python cli.py documents`, or `--json` for
+  `{"collection": str, "total_chunks": int, "documents": [{"file": str, "chunks": int}]}`
+  (stable schema; files sorted by name).
+- **Start over:** `python cli.py ingest file.pdf --recreate` drops the whole
+  collection first. Needed after changing the embedding model.
 
-### 5. Supabase + login
+`python ingest.py …` still works as a shortcut (including the old `--pdf` flag).
 
-Supabase powers both auth (login/logout) and chat history.
-
-1. Create a Supabase project.
-2. **Project Settings → API** → copy the **Project URL**
-   (`https://<ref>.supabase.co`, *not* the dashboard URL) and the **anon** key.
-3. Put them where they belong:
-   - `backend/.env` → `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
-   - `frontend/.env` → `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
-
-   The **service_role** key (Settings → API → "service_role", Reveal) is a
-   backend-only secret — never put it in the frontend.
-4. Run the database migrations (see next section).
-
-### Database migrations
-
-Schema lives in [`supabase/migrations/`](supabase/migrations/) and is applied with
-the Supabase CLI (`npx supabase`, no install needed).
-
-**One-time setup:**
+## Ask questions
 
 ```bash
-cp supabase/.env.example supabase/.env
+python cli.py ask "What is a countable noun?"
+python cli.py ask                                  # interactive, 'exit' to quit
+python cli.py ask "..." --show-chunks              # also print each chunk in full
+python cli.py ask "..." --json                     # machine-readable
 ```
 
-Then edit `supabase/.env` and set `SUPABASE_DB_URL` — get it from the Supabase
-dashboard **Connect** button ("Session pooler" or "Direct connection"), replacing
-`[YOUR-PASSWORD]` with your DB password.
+The answer is printed with its `[S1]`… markers followed by the sources, each
+with file, page (PDFs only) and similarity score. If nothing is retrieved (or
+nothing passes `--min-score`), the LLM is not called and the status is
+`no_results`. `python ask.py "…"` remains as a shortcut.
 
-**Apply migrations (run this whenever you add a new file to `supabase/migrations/`):**
-
-```powershell
-./supabase/migrate.ps1        # Windows
-```
+## Inspect retrieval
 
 ```bash
-./supabase/migrate.sh         # macOS / Linux
+python cli.py search "What is a countable noun?" -k 8          # no LLM call
+python cli.py search "..." --full                               # whole chunk text
+python cli.py search "..." --json                               # scores + metadata
 ```
 
-The CLI records applied migrations in `supabase_migrations.schema_migrations`, so
-re-running only applies what's new — the DB stays in sync with the repo.
+Each hit shows score, file, page, `chunk_id` and `doc_id`. With `--json`, step
+progress goes to stderr and stdout holds only the JSON.
 
-**Add a migration:** create `supabase/migrations/<timestamp>_name.sql` (e.g.
-`20260901090000_add_progress_table.sql`) and run the migrate script again.
+## Optional FastAPI service
 
-### How auth works
-
-- **Sign up** goes to the backend `POST /api/auth/register`, which creates an
-  already-confirmed user via the Supabase admin API. **No confirmation email is
-  sent**, so it never hits Supabase's email rate limit. The React app then signs in.
-- **Sign in / out** use `@supabase/supabase-js` directly; the app holds the session.
-- Each `POST /api/chat` sends the Supabase access token as
-  `Authorization: Bearer <token>`. The backend validates it via
-  `GET /auth/v1/user`, then writes the conversation and messages with that same
-  token, so row-level security keeps every user to their own rows.
-- If Supabase env vars are blank, `/api/chat` returns 401 (auth is required).
-- Without `SUPABASE_SERVICE_ROLE_KEY`, sign-up is disabled (sign-in still works) —
-  create users from the Supabase dashboard instead.
-
-## Environment Variables
-
-`frontend/.env`
-
-```env
-VITE_API_URL=http://localhost:5000
-VITE_SUPABASE_URL=
-VITE_SUPABASE_ANON_KEY=
+```bash
+pip install -r requirements-api.txt
+python cli.py serve --port 8000            # or: uvicorn main:app --port 8000
+python cli.py serve --collection experiments
 ```
 
-`backend/.env`
+`--collection` (also on `ui`) applies to that server process only; without it
+the server uses `COLLECTION_NAME`. The command prints which collection it uses,
+and `.env` is never modified.
 
-```env
-RAG_SERVICE_URL=http://localhost:8000
-FRONTEND_URL=http://localhost:5173
-SUPABASE_URL=
-SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=
+- `GET /health` → `{"status": "ok", "ready": true}`
+- `POST /query` with `{"question": "...", "top_k": 4}` →
+  `{"answer": "...", "status": "answered" | "no_results", "sources": [{"page", "source", "score", "marker", "chunk_id", "text"}]}`
+
+`answer` has the markers stripped; `marker` on each source maps them back.
+Pipeline failures return 503 with the reason.
+
+## Optional Streamlit test UI
+
+```bash
+pip install -r requirements-ui.txt
+python cli.py ui                           # http://localhost:8501
 ```
 
-`rag/.env`
+Upload and ingest documents, ask questions or run retrieval only, and inspect
+scores, pages, chunk text and metadata. Uploads are saved under `uploads/`
+(git-ignored). It is a testing tool, not a production front end.
 
-```env
-GEMINI_API_KEY=
-GEMINI_MODEL=gemini-1.5-flash
-GEMINI_EMBED_MODEL=text-embedding-004
-QDRANT_URL=http://localhost:6333
-QDRANT_API_KEY=
-QDRANT_COLLECTION=english_book
-TOP_K=5
-BOOK_PATH=data/english-book.pdf
+## Use from Python
+
+```python
+from rag.pipeline import Pipeline
+
+pipeline = Pipeline(collection="pdf_rag")
+pipeline.ingest("data/book.pdf")
+result = pipeline.ask("What is a noun?")
+print(result.status, result.answer_without_markers)
+for source in result.sources:
+    print(source["marker"], source["file"], source["page"], source["score"])
+pipeline.close()
 ```
+
+## Supported inputs and providers
+
+- **Files:** `.pdf` (text layer required), `.txt` and `.md` (UTF-8).
+- **Embeddings:** any sentence-transformers model through Hugging Face, or
+  Gemini embeddings.
+- **LLM:** Gemini via `langchain-google-genai`.
+- **Vector store:** Qdrant, embedded (`QDRANT_PATH`) or server (`QDRANT_URL`).
+
+### PDF font repair
+
+Some PDFs embed subset fonts without a `ToUnicode` map, and every extractor
+returns scrambled glyphs (`& ? ! & &`). [`rag/pdf_font_repair.py`](rag/pdf_font_repair.py)
+reverses that substitution for the bundled `-Free-English-Grammar.pdf`. It is
+off by default; enable it with `PDF_FONT_REPAIR=true` or `--font-repair on`.
+Its maps are specific to that PDF; for other broken PDFs, use OCR instead.
+
+## Tests
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest                     # unit tests: no network, no model download, no API calls
+```
+
+Integration tests are opt-in. They run the CLI against your real `.env`:
+
+```bash
+# PowerShell: $env:RAG_RUN_INTEGRATION = "1"
+RAG_RUN_INTEGRATION=1 python -m pytest -m integration
+RAG_RUN_INTEGRATION=1 RAG_RUN_GEMINI=1 python -m pytest -m "integration or gemini"   # uses Gemini quota
+```
+
+They read `COLLECTION_NAME` without changing it, and ingest only into a
+uniquely named collection inside a temporary Qdrant folder. Stop `serve` and
+`ui` first.
+
+## Troubleshooting
+
+| Message | Fix |
+| ------- | --- |
+| `No local Qdrant store at …` | Ingest something first, or point `QDRANT_PATH` at the existing store. |
+| `… is in use by another process` | Embedded Qdrant allows one process. Stop `serve`/`ui`/other commands, or use a Qdrant server. |
+| `Collection 'x' holds N-dimensional vectors, but … produces M` | The embedding model changed. Restore `EMBEDDING_MODEL`, use another `COLLECTION_NAME`, or `--recreate`. |
+| `GOOGLE_API_KEY is not set` | Put the key in `.env` next to `config.py`. |
+| `… could not answer … 429` | Gemini rate limit or quota. Wait, or raise `EMBED_SLEEP` when using Gemini embeddings. |
+| `… page(s) look corrupted` | Scrambled text: try `--font-repair on`; scanned PDF: run OCR (e.g. `ocrmypdf`). |
+| `Unsupported file type` | Convert to PDF, `.txt` or `.md`. |
+
+## Known limitations
+
+- Embedded Qdrant is single-process: run one of CLI / API / UI at a time.
+- No OCR: scanned PDFs need to be OCR'd first.
+- Documents are identified by file name within a collection.
+- Only Gemini is wired up for generation.
+- Chunks indexed before the migration lack `doc_id` and `file_type`
+  metadata; re-ingest the file to add them.
+
+## License
+
+[MIT](LICENSE)

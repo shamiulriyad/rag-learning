@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 420" width="960" height="420" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13">
+  <title>RAG toolkit pipeline</title>
+  <desc>CLI, FastAPI and Streamlit call one Pipeline. Ingest: load, extract (optional font repair), clean, chunk, embed, store in Qdrant. Query: question, embed query, retrieve from Qdrant, Gemini, answer with sources.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5b6472"/>
+    </marker>
+  </defs>
+
+  <rect width="960" height="420" fill="#ffffff"/>
+
+  <!-- entry points -->
+  <rect fill="#eef2f7" stroke="#5b6472" stroke-width="1.2" x="250" y="16" width="120" height="36" rx="6"/>
+  <text fill="#1f2933" x="310" y="39" text-anchor="middle">cli.py</text>
+  <rect fill="#eef2f7" stroke="#5b6472" stroke-width="1.2" x="420" y="16" width="120" height="36" rx="6"/>
+  <text fill="#1f2933" x="480" y="34" text-anchor="middle">main.py</text>
+  <text fill="#5b6472" font-size="11" x="480" y="47" text-anchor="middle">FastAPI (optional)</text>
+  <rect fill="#eef2f7" stroke="#5b6472" stroke-width="1.2" x="590" y="16" width="120" height="36" rx="6"/>
+  <text fill="#1f2933" x="650" y="34" text-anchor="middle">streamlit_app.py</text>
+  <text fill="#5b6472" font-size="11" x="650" y="47" text-anchor="middle">test UI (optional)</text>
+  <path stroke="#5b6472" stroke-width="1.3" fill="none" marker-end="url(#arrow)" d="M310,52 L460,82"/>
+  <path stroke="#5b6472" stroke-width="1.3" fill="none" marker-end="url(#arrow)" d="M480,52 L480,82"/>
+  <path stroke="#5b6472" stroke-width="1.3" fill="none" marker-end="url(#arrow)" d="M650,52 L500,82"/>
+  <rect fill="#ffffff" stroke="#5b6472" stroke-width="1.2" x="400" y="84" width="160" height="32" rx="6"/>
+  <text fill="#1f2933" x="480" y="105" text-anchor="middle">rag/pipeline.py</text>
+
+  <!-- ingest lane -->
+  <rect fill="#f7f8fa" stroke="#d5d9e0" stroke-width="1" x="16" y="134" width="740" height="110" rx="8"/>
+  <text fill="#1f2933" font-weight="600" font-size="14" x="32" y="156">Ingest (steps 1–6)</text>
+  <g>
+    <rect fill="#ffffff" stroke="#5b6472" stroke-width="1.2" x="32" y="172" width="112" height="48" rx="6"/>
+    <text fill="#1f2933" x="88" y="192" text-anchor="middle">1 Load</text>
+    <text fill="#5b6472" font-size="11" x="88" y="208" text-anchor="middle">.pdf .txt .md</text>
+    <rect fill="#ffffff" stroke="#5b6472" stroke-width="1.2" x="168" y="172" width="128" height="48" rx="6"/>
+    <text fill="#1f2933" x="232" y="192" text-anchor="middle">2 Extract</text>
+    <text fill="#5b6472" font-size="11" x="232" y="208" text-anchor="middle">+ optional font repair</text>
+    <rect fill="#ffffff" stroke="#5b6472" stroke-width="1.2" x="320" y="172" width="112" height="48" rx="6"/>
+    <text fill="#1f2933" x="376" y="192" text-anchor="middle">3 Clean</text>
+    <text fill="#5b6472" font-size="11" x="376" y="208" text-anchor="middle">headers, wraps</text>
+    <rect fill="#ffffff" stroke="#5b6472" stroke-width="1.2" x="456" y="172" width="112" height="48" rx="6"/>
+    <text fill="#1f2933" x="512" y="192" text-anchor="middle">4 Chunk</text>
+    <text fill="#5b6472" font-size="11" x="512" y="208" text-anchor="middle">size + overlap</text>
+    <rect fill="#ffffff" stroke="#5b6472" stroke-width="1.2" x="592" y="172" width="128" height="48" rx="6"/>
+    <text fill="#1f2933" x="656" y="192" text-anchor="middle">5 Embed</text>
+    <text fill="#5b6472" font-size="11" x="656" y="208" text-anchor="middle">bge-m3 or Gemini</text>
+    <path stroke="#5b6472" stroke-width="1.3" fill="none" marker-end="url(#arrow)" d="M144,196 L166,196"/>
+    <path stroke="#5b6472" stroke-width="1.3" fill="none" marker-end="url(#arrow)" d="M296,196 L318,196"/>
+    <path stroke="#5b6472" stroke-width="1.3" fill="none" marker-end="url(#arrow)" d="M432,196 L454,196"/>
+    <path stroke="#5b6472" stroke-width="1.3" fill="none" marker-end="url(#arrow)" d="M568,196 L590,196"/>
+    <path stroke="#5b6472" stroke-width="1.3" fill="none" marker-end="url(#arrow)" d="M720,196 L762,196"/>
+  </g>
+
+  <!-- Qdrant spans both lanes -->
+  <rect fill="#e8f3ec" stroke="#3d7a55" stroke-width="1.4" x="764" y="172" width="164" height="190" rx="8"/>
+  <text fill="#1f2933" x="846" y="194" text-anchor="middle" font-weight="600">6 Qdrant</text>
+  <text fill="#5b6472" font-size="11" x="846" y="212" text-anchor="middle">embedded folder</text>
+  <text fill="#5b6472" font-size="11" x="846" y="226" text-anchor="middle">or server</text>
+  <text fill="#5b6472" font-size="11" x="846" y="250" text-anchor="middle">IDs from file + hash</text>
+  <text fill="#5b6472" font-size="11" x="846" y="264" text-anchor="middle">re-ingest replaces</text>
+  <text fill="#5b6472" font-size="11" x="846" y="288" text-anchor="middle">dimension checked</text>
+  <text fill="#5b6472" font-size="11" x="846" y="302" text-anchor="middle">on every open</text>
+
+  <!-- query lane -->
+  <rect fill="#f7f8fa" stroke="#d5d9e0" stroke-width="1" x="16" y="262" width="740" height="142" rx="8"/>
+  <text fill="#1f2933" font-weight="600" font-size="14" x="32" y="284">Query (steps 7–11)</text>
+  <g>
+    <rect fill="#ffffff" stroke="#5b6472" stroke-width="1.2" x="32" y="300" width="112" height="48" rx="6"/>
+    <text fill="#1f2933" x="88" y="320" text-anchor="middle">7 Question</text>
+    <rect fill="#ffffff" stroke="#5b6472" stroke-width="1.2" x="168" y="300" width="128" height="48" rx="6"/>
+    <text fill="#1f2933" x="232" y="320" text-anchor="middle">8 Embed query</text>
+    <text fill="#5b6472" font-size="11" x="232" y="336" text-anchor="middle">same model as 5</text>
+    <rect fill="#ffffff" stroke="#5b6472" stroke-width="1.2" x="592" y="300" width="128" height="48" rx="6"/>
+    <text fill="#1f2933" x="656" y="320" text-anchor="middle">9 Retrieve</text>
+    <text fill="#5b6472" font-size="11" x="656" y="336" text-anchor="middle">top k, min score</text>
+    <rect fill="#fdf1e3" stroke="#b0702a" stroke-width="1.4" x="400" y="300" width="128" height="48" rx="6"/>
+    <text fill="#1f2933" x="464" y="320" text-anchor="middle">10 Gemini</text>
+    <text fill="#5b6472" font-size="11" x="464" y="336" text-anchor="middle">context only, [S1]</text>
+    <rect fill="#ffffff" stroke="#5b6472" stroke-width="1.2" x="168" y="360" width="232" height="36" rx="6"/>
+    <text fill="#1f2933" x="284" y="383" text-anchor="middle">11 Answer + sources (file, page, score)</text>
+    <path stroke="#5b6472" stroke-width="1.3" fill="none" marker-end="url(#arrow)" d="M144,324 L166,324"/>
+    <path stroke="#5b6472" stroke-width="1.3" fill="none" marker-end="url(#arrow)" d="M296,316 L320,290 L656,290 L656,298"/>
+    <path stroke="#5b6472" stroke-width="1.3" fill="none" marker-end="url(#arrow)" d="M720,324 L762,324"/>
+    <path stroke="#5b6472" stroke-width="1.3" fill="none" marker-end="url(#arrow)" stroke-dasharray="4 3" d="M762,336 L722,336"/>
+    <path stroke="#5b6472" stroke-width="1.3" fill="none" marker-end="url(#arrow)" d="M592,340 L530,340"/>
+    <path stroke="#5b6472" stroke-width="1.3" fill="none" marker-end="url(#arrow)" d="M464,348 L464,378 L402,378"/>
+    <text fill="#5b6472" font-size="11" x="540" y="384">no hits: LLM skipped, status no_results</text>
+  </g>
+</svg>
