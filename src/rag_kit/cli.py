@@ -1,17 +1,18 @@
-"""Command-line interface for the RAG toolkit.
+"""Command-line interface for the RAG toolkit (`rag-kit`, or `python -m rag_kit`).
 
-    python cli.py check [--deep] [--llm]      validate config, dependencies, store
-    python cli.py ingest FILE [FILE ...]      steps 1-6 (re-ingesting replaces)
-    python cli.py ask "question"              steps 7-11 (no question = interactive)
-    python cli.py search "question"           retrieval only, no LLM call
-    python cli.py documents [--json]          files in the collection + chunk counts
-    python cli.py delete FILE_NAME            remove one document's chunks
-    python cli.py serve                       FastAPI service (needs rag-kit[api])
-    python cli.py ui                          Streamlit test UI (needs rag-kit[ui])
+    rag-kit check [--deep] [--llm]      validate config, dependencies, store
+    rag-kit ingest FILE [FILE ...]      steps 1-6 (re-ingesting replaces)
+    rag-kit ask "question"              steps 7-11 (no question = interactive)
+    rag-kit search "question"           retrieval only, no LLM call
+    rag-kit documents [--json]          files in the collection + chunk counts
+    rag-kit delete FILE_NAME            remove one document's chunks
+    rag-kit serve                       FastAPI service (needs rag-kit[api])
+    rag-kit ui                          Streamlit test UI (needs rag-kit[ui])
 
-The project (its .env, documents and Qdrant data) is the nearest folder at or
-above the current directory that contains rag-kit.toml, or RAG_PROJECT_DIR.
-Every command takes --collection to work on something other than COLLECTION_NAME.
+The project (its .env, documents and Qdrant data) is --project DIR if given,
+else RAG_PROJECT_DIR, else the nearest folder at or above the current
+directory that contains rag-kit.toml. Every command takes --project and
+--collection (to work on something other than COLLECTION_NAME).
 """
 
 import argparse
@@ -219,7 +220,7 @@ def cmd_ingest(args) -> int:
         pipeline.close()
 
     if not failed:
-        print('\nDone. Now ask something:  python cli.py ask "your question"')
+        print('\nDone. Now ask something:  rag-kit ask "your question"')
     return 1 if failed else 0
 
 
@@ -328,7 +329,7 @@ def cmd_delete(args) -> int:
     finally:
         pipeline.close()
     print(f"Removed {removed} chunks of '{name}'." if removed
-          else f"No chunks found for '{name}'. `python cli.py documents` lists file names.")
+          else f"No chunks found for '{name}'. `rag-kit documents` lists file names.")
     return 0
 
 
@@ -378,6 +379,9 @@ def cmd_ui(args) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="rag-kit", description="Standalone RAG toolkit.")
     common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--project", metavar="DIR",
+                        help="project folder (default: RAG_PROJECT_DIR, else the nearest "
+                             "folder with rag-kit.toml)")
     common.add_argument("--collection", help="Qdrant collection (default: COLLECTION_NAME)")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -433,7 +437,7 @@ def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     show_progress()  # step progress to stdout (stderr under --json, see _quiet)
     try:
-        args.settings = Settings.load()
+        args.settings = Settings.load(project_dir=args.project)
     except RagError as exc:
         if args.command != "check":
             print(f"error: {exc}", file=sys.stderr)

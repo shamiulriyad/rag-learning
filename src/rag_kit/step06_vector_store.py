@@ -53,7 +53,7 @@ def get_client(create: bool = True, settings: Optional[Settings] = None) -> Qdra
         path = Path(settings.qdrant_path)
         if not create and not path.exists():
             raise VectorStoreError(
-                f"No local Qdrant store at {path}. Run `python cli.py ingest <file>` first, "
+                f"No local Qdrant store at {path}. Run `rag-kit ingest <file>` first, "
                 f"or point QDRANT_PATH at the existing store (relative paths are resolved "
                 f"from {settings.project_dir})."
             )

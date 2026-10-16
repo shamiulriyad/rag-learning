@@ -143,6 +143,34 @@ def test_json_mode_keeps_stdout_pure(monkeypatch, capsys):
     assert "[9] Retrieved" in captured.err
 
 
+def test_project_option_works_from_anywhere_and_beats_rag_project_dir(tmp_path):
+    project = _make_project(tmp_path, "QDRANT_PATH=./definitely_missing_store_for_tests\n")
+    other = tmp_path / "other"
+    other.mkdir()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+
+    result = _run(["documents", "--project", str(project)], cwd=elsewhere,
+                  env_file=project / ".env", project=other)
+
+    assert result.returncode == 1
+    assert str(project / "definitely_missing_store_for_tests") in result.stderr
+    assert list(elsewhere.iterdir()) == [] and list(other.iterdir()) == []
+
+
+def test_project_option_needs_no_marker_but_must_exist(tmp_path):
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    missing = tmp_path / "missing"
+
+    ok = _run(["check", "--project", str(plain)], cwd=tmp_path, env_file=plain / ".env")
+    bad = _run(["documents", "--project", str(missing)], cwd=tmp_path, env_file=plain / ".env")
+
+    assert f"Project     : {plain.resolve()}" in ok.stdout
+    assert bad.returncode == 1 and "does not exist" in bad.stderr
+    assert not missing.exists()
+
+
 # --- dependency check: derived from the package metadata (pyproject extras) -----
 
 
@@ -221,6 +249,13 @@ def test_server_commands_default_to_configured_collection(command, captured_laun
     assert "collection 'pdf_rag' (from COLLECTION_NAME)" in capsys.readouterr().out
 
 
+def test_server_commands_pass_the_chosen_project_to_the_child(tmp_path, captured_launch):
+    project = _make_project(tmp_path)
+    assert cli.main(["serve", "--project", str(project)]) == 0
+    [(_cmd, env)] = captured_launch
+    assert env["RAG_PROJECT_DIR"] == str(project)
+
+
 def test_serve_runs_the_packaged_app(captured_launch):
     assert cli.main(["serve", "--port", "8123"]) == 0
     [(cmd, _env)] = captured_launch
@@ -269,3 +304,6 @@ def test_every_documented_command_exists(command):
     parser = cli.build_parser()
     subparsers = next(a for a in parser._actions if a.dest == "command")
     assert command in subparsers.choices
+    options = {opt for action in subparsers.choices[command]._actions
+               for opt in action.option_strings}
+    assert {"--project", "--collection"} <= options

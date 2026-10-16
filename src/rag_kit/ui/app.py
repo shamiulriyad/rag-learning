@@ -1,7 +1,7 @@
 """Optional Streamlit UI for testing the pipeline - not a production app.
 
     pip install "rag-kit[ui]"
-    python cli.py ui                       # http://localhost:8501
+    rag-kit ui                             # http://localhost:8501
 
 Upload and ingest documents, ask questions, and inspect the retrieved chunks.
 Uploads are saved under the project's uploads/ folder (git-ignored). Local
