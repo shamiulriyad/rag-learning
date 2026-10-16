@@ -123,3 +123,41 @@ def test_link_problems_are_reported(tmp_path):
     assert "relative link '../nope.md' does not resolve" in out
     assert "../LICENSE" not in out and "example.com" not in out and "#metadata" not in out
     assert out.count("FAIL") == 4
+
+
+# --- sdist builds the same package as the wheel ----------------------------------
+
+
+def _wheel(path, files, metadata="Name: rag-kit\n", entry_points="[console_scripts]\n"):
+    import base64
+    import hashlib
+    import zipfile
+
+    record = []
+    with zipfile.ZipFile(path, "w") as wheel:
+        for name, data in files.items():
+            wheel.writestr(name, data)
+            digest = base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode()
+            record.append(f"{name},sha256={digest},{len(data)}")
+        wheel.writestr("rag_kit-0.1.0.dist-info/METADATA", metadata)
+        wheel.writestr("rag_kit-0.1.0.dist-info/entry_points.txt", entry_points)
+        wheel.writestr("rag_kit-0.1.0.dist-info/RECORD", "\n".join(record) + "\n")
+    return path
+
+
+def test_sdist_wheel_comparison(tmp_path):
+    sys.path.insert(0, str(SCRIPTS / "ci"))
+    from check_sdist_build import compare, wheel_contents
+
+    files = {"rag_kit/__init__.py": b"x", "rag_kit/cli.py": b"y"}
+    release = wheel_contents(_wheel(tmp_path / "a.whl", files))
+    assert compare(release, wheel_contents(_wheel(tmp_path / "b.whl", files))) == []
+
+    changed = wheel_contents(_wheel(tmp_path / "c.whl", {**files, "rag_kit/cli.py": b"z"}))
+    assert compare(release, changed) == [
+        "rag_kit/cli.py differs between the release wheel and the sdist's wheel"]
+    fewer = wheel_contents(_wheel(tmp_path / "d.whl", {"rag_kit/__init__.py": b"x"}))
+    assert compare(release, fewer) == ["the sdist's wheel lacks rag_kit/cli.py"]
+    other_meta = wheel_contents(_wheel(tmp_path / "e.whl", files, metadata="Name: other\n"))
+    assert compare(release, other_meta) == [
+        "METADATA differs between the release wheel and the sdist's wheel"]
