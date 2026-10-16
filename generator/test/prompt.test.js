@@ -59,6 +59,17 @@ test("non-interactive runs and --yes require --embeddings", async () => {
   }
 });
 
+test("the local disclosure states the measured install size and the separate model download", () => {
+  for (const platform of ["win32", "darwin", "linux"]) {
+    const text = disclosure("local", { platform, gpu: false });
+    assert.match(text, /about 1 GB on disk \(measured on Windows\)/, platform);
+    assert.match(text, /Actual disk use varies by platform and dependency versions\./, platform);
+    assert.match(text, /BGE-M3 model \(about 2\.3 GB\) is downloaded separately/, platform);
+    assert.match(text, /first time you ingest a document - not during this setup/, platform);
+    assert.doesNotMatch(text, /several hundred MB/, platform);
+  }
+});
+
 test("the local disclosure matches the platform", () => {
   assert.match(disclosure("local", { platform: "linux", gpu: false }), /CPU-only PyTorch/);
   assert.match(disclosure("local", { platform: "linux", gpu: true }), /PyTorch with CUDA/);

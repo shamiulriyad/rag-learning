@@ -13,10 +13,11 @@ export function disclosure(choice, { platform, gpu }) {
     platform === "linux"
       ? gpu
         ? "  - Installs PyTorch with CUDA (--gpu) and sentence-transformers: several GB."
-        : "  - Installs CPU-only PyTorch and sentence-transformers: several hundred MB."
-      : "  - Installs PyTorch and sentence-transformers: several hundred MB.",
-    "  - Downloads the model (about 2.3 GB) into the Hugging Face cache the first time",
-    "    you ingest a document - not during this setup.",
+        : "  - Installs CPU-only PyTorch and sentence-transformers: about 1 GB on disk (measured on Windows)."
+      : "  - Installs PyTorch and sentence-transformers: about 1 GB on disk (measured on Windows).",
+    "    Actual disk use varies by platform and dependency versions.",
+    "  - The BGE-M3 model (about 2.3 GB) is downloaded separately into the Hugging Face",
+    "    cache the first time you ingest a document - not during this setup.",
   ];
   const gemini = [
     "Gemini (EMBEDDING_PROVIDER=google, model models/gemini-embedding-001)",

@@ -19,10 +19,11 @@ before anything is installed. There is no default; in scripts and CI pass
 `--embeddings`.
 
 - **`local`** - BAAI/bge-m3 on your computer. No API key for embeddings.
-  Installs PyTorch and sentence-transformers (several hundred MB; on Linux the
-  CPU-only PyTorch build unless you pass `--gpu`). The model (about 2.3 GB) is
-  downloaded into the Hugging Face cache the first time you ingest a document,
-  never during setup.
+  Installs PyTorch and sentence-transformers: about 1 GB on disk (measured on
+  Windows); actual disk use varies by platform and dependency versions. On Linux
+  the CPU-only PyTorch build is used unless you pass `--gpu`. The BGE-M3 model
+  (about 2.3 GB) is downloaded separately into the Hugging Face cache the first
+  time you ingest a document, never during setup.
 - **`gemini`** - Google's embedding API. Small install, no model download.
   Needs a `GOOGLE_API_KEY` with embedding quota; document text is sent to
   Google.
