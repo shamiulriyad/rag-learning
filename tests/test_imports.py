@@ -17,20 +17,20 @@ def _loaded_after(statement: str, module: str) -> bool:
 
 
 def test_pipeline_import_does_not_load_gemini():
-    assert not _loaded_after("import rag.pipeline", "langchain_google_genai")
+    assert not _loaded_after("import rag_kit.pipeline", "langchain_google_genai")
 
 
 def test_cli_import_does_not_load_gemini():
-    assert not _loaded_after("import cli", "langchain_google_genai")
+    assert not _loaded_after("import rag_kit.cli", "langchain_google_genai")
 
 
-def test_get_llm_without_gemini_sdk_is_actionable(load_config, monkeypatch):
+def test_get_llm_without_gemini_sdk_is_actionable(test_settings, monkeypatch):
     import pytest
 
-    from rag.errors import GenerationError
-    from rag.step10_generate import get_llm
+    from rag_kit.errors import GenerationError
+    from rag_kit.step10_generate import get_llm
 
-    load_config(GOOGLE_API_KEY="test-key-not-real")
+    settings = test_settings.replace(google_api_key="test-key-not-real")
     monkeypatch.setitem(sys.modules, "langchain_google_genai", None)  # import now fails
     with pytest.raises(GenerationError, match="pip install langchain-google-genai"):
-        get_llm()
+        get_llm(settings)

@@ -7,8 +7,8 @@ import sys
 
 import pytest
 
-from rag.env import export_env_file
-from rag.settings import Settings
+from rag_kit.env import export_env_file
+from rag_kit.settings import Settings
 from tests.conftest import ROOT
 
 SECRET = "secret-value-must-never-appear"
@@ -82,7 +82,7 @@ def test_rag_export_env_cannot_export_rag_kit_settings(tmp_path, caplog):
         ENV_TEXT + "RAG_EXPORT_ENV=GOOGLE_API_KEY,QDRANT_API_KEY,RAG_PROJECT_DIR\n",
         encoding="utf-8")
     environ = {}
-    with caplog.at_level(logging.WARNING, logger="rag"):
+    with caplog.at_level(logging.WARNING, logger="rag_kit"):
         export_env_file(Settings.load(tmp_path, environ={}), environ)
 
     assert "GOOGLE_API_KEY" not in environ and "QDRANT_API_KEY" not in environ
@@ -132,15 +132,17 @@ def test_cli_exports_allow_list_and_never_prints_values(tmp_path):
     env = {k: v for k, v in os.environ.items()
            if not k.startswith(("HF_", "TRANSFORMERS_", "RAG_")) and k.upper() not in
            {"HTTPS_PROXY", "NO_PROXY", "GOOGLE_API_KEY"}}
-    env.update({"RAG_ENV_FILE": str(env_file), "PYTHONIOENCODING": "utf-8"})
+    env.update({"RAG_ENV_FILE": str(env_file), "RAG_PROJECT_DIR": str(tmp_path),
+                "PYTHONIOENCODING": "utf-8"})
 
-    result = subprocess.run([sys.executable, str(ROOT / "cli.py"), "check"], cwd=tmp_path,
+    result = subprocess.run([sys.executable, "-m", "rag_kit", "check"], cwd=tmp_path,
                             env=env, capture_output=True, text=True, timeout=120)
 
     output = result.stdout + result.stderr
     assert "env export" in output and "HF_HOME" in output and "https_proxy" in output
     assert "MY_TOOL_TOKEN" not in output
     assert SECRET not in output
+    assert not (tmp_path / "missing_store_for_env_test").exists()
     assert not (ROOT / "missing_store_for_env_test").exists()
 
 
@@ -158,16 +160,16 @@ def test_default_api_app_exports_at_startup_but_custom_apps_do_not(settings, res
     pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient
 
-    import main
+    from rag_kit import api
 
     for name in ("HF_HOME", "SSL_CERT_FILE", "GOOGLE_API_KEY"):
         monkeypatch.delenv(name, raising=False)
 
-    with TestClient(main.create_app(settings=settings)):
+    with TestClient(api.create_app(settings=settings)):
         assert "HF_HOME" not in os.environ
 
-    with TestClient(main.create_app(settings=settings, export_env=True)):
+    with TestClient(api.create_app(settings=settings, export_env=True)):
         assert os.environ["HF_HOME"] == "/tmp/hf-home"
         assert "GOOGLE_API_KEY" not in os.environ
 
-    assert main.app.state.export_env is True  # the default app is the exporting one
+    assert api.app.state.export_env is True  # the default app is the exporting one

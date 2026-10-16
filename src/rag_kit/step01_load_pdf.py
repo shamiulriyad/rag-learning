@@ -2,14 +2,14 @@
 
 Validate the file before anything else, so a wrong path fails here
 instead of halfway through the pipeline. PDF, plain text and Markdown are
-supported (see rag.settings.SUPPORTED_EXTENSIONS).
+supported (see rag_kit.settings.SUPPORTED_EXTENSIONS).
 """
 
 import logging
 from pathlib import Path
 
-from rag.errors import UnsupportedFileError
-from rag.settings import SUPPORTED_EXTENSIONS
+from rag_kit.errors import UnsupportedFileError
+from rag_kit.settings import SUPPORTED_EXTENSIONS
 
 logger = logging.getLogger(__name__)
 

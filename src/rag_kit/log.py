@@ -1,6 +1,6 @@
 """Step progress goes through logging, not print().
 
-Library code logs to the "rag" logger, which has only a NullHandler, so a
+Library code logs to the "rag_kit" logger, which has only a NullHandler, so a
 program that imports the pipeline sees no output unless it asks for it.
 Applications (the CLI, the API service, the Streamlit UI) call
 `show_progress()` to print the same "[1] Document : ..." lines as before.
@@ -9,7 +9,7 @@ Applications (the CLI, the API service, the Streamlit UI) call
 import logging
 import sys
 
-LOGGER_NAME = "rag"  # rag/__init__.py gives it a NullHandler
+LOGGER_NAME = "rag_kit"  # rag_kit/__init__.py gives it a NullHandler
 
 
 class _CurrentStdout(logging.StreamHandler):

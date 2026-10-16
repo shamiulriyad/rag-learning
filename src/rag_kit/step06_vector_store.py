@@ -27,9 +27,9 @@ from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 
-from rag.errors import EmptyDocumentError, RagError, VectorStoreError
-from rag.settings import Settings, default_settings
-from rag.step05_embedding import detect_dimension
+from rag_kit.errors import EmptyDocumentError, RagError, VectorStoreError
+from rag_kit.settings import Settings, default_settings
+from rag_kit.step05_embedding import detect_dimension
 
 logger = logging.getLogger(__name__)
 

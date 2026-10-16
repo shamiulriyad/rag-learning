@@ -1,44 +1,45 @@
 """Optional Streamlit UI for testing the pipeline - not a production app.
 
-    pip install -r requirements-ui.txt
-    python cli.py ui                       # or: streamlit run streamlit_app.py
+    pip install "rag-kit[ui]"
+    python cli.py ui                       # http://localhost:8501
 
 Upload and ingest documents, ask questions, and inspect the retrieved chunks.
-Uploads are saved under uploads/ (git-ignored). Local Qdrant allows one process
-at a time, so stop `serve` or other CLI commands while this runs.
+Uploads are saved under the project's uploads/ folder (git-ignored). Local
+Qdrant allows one process at a time, so stop `serve` or other CLI commands
+while this runs. `rag-kit ui` passes the project in RAG_PROJECT_DIR.
 """
 
-import sys
 from pathlib import Path
 
 import streamlit as st
 
-ROOT = Path(__file__).resolve().parent
-sys.path.insert(0, str(ROOT))
-
-import config  # noqa: E402
-from rag.env import export_env_file  # noqa: E402
-from rag.errors import RagError  # noqa: E402
-from rag.log import show_progress  # noqa: E402
-from rag.pipeline import Pipeline  # noqa: E402
-from rag.step05_embedding import get_embeddings  # noqa: E402
-from rag.step06_vector_store import describe_location, get_client  # noqa: E402
-
-UPLOAD_DIR = ROOT / "uploads"
+from rag_kit.env import export_env_file
+from rag_kit.errors import RagError
+from rag_kit.log import show_progress
+from rag_kit.pipeline import Pipeline
+from rag_kit.settings import SUPPORTED_EXTENSIONS, default_settings
+from rag_kit.step05_embedding import get_embeddings
+from rag_kit.step06_vector_store import describe_location, get_client
 
 st.set_page_config(page_title="RAG toolkit - test UI", layout="wide")
 show_progress()  # step progress in the terminal running streamlit, as before
-export_env_file(config.SETTINGS)  # HF_HOME, proxies etc. before the model loads
+try:
+    settings = default_settings()
+except RagError as exc:  # no rag-kit project found
+    st.error(str(exc))
+    st.stop()
+export_env_file(settings)  # HF_HOME, proxies etc. before the model loads
+UPLOAD_DIR = settings.project_dir / "uploads"
 
 
 @st.cache_resource(show_spinner="Loading embedding model...")
 def shared_embeddings():
-    return get_embeddings()
+    return get_embeddings(settings)
 
 
 @st.cache_resource(show_spinner="Opening Qdrant...")
 def shared_client():
-    return get_client(create=True)
+    return get_client(create=True, settings=settings)
 
 
 def pipeline_for(collection: str) -> Pipeline:
@@ -46,7 +47,7 @@ def pipeline_for(collection: str) -> Pipeline:
     cache = st.session_state.setdefault("pipelines", {})
     if collection not in cache:
         cache[collection] = Pipeline(collection=collection, embeddings=shared_embeddings(),
-                                     client=shared_client())
+                                     client=shared_client(), settings=settings)
     return cache[collection]
 
 
@@ -57,13 +58,13 @@ def show_error(exc: Exception) -> None:
 # --- sidebar: settings + indexed documents -------------------------------------
 with st.sidebar:
     st.header("Settings")
-    collection = st.text_input("Collection", value=config.COLLECTION_NAME).strip()
-    top_k = st.slider("Chunks to retrieve (top k)", 1, 20, config.TOP_K)
+    collection = st.text_input("Collection", value=settings.collection_name).strip()
+    top_k = st.slider("Chunks to retrieve (top k)", 1, 20, settings.top_k)
     min_score = st.number_input("Min score (0 = keep all)", 0.0, 1.0,
-                                float(config.MIN_SCORE or 0.0), 0.05)
-    st.caption(f"Store: {describe_location()}")
-    st.caption(f"Embedding: {config.EMBEDDING_MODEL}  \nLLM: {config.LLM_MODEL}")
-    if not config.GOOGLE_API_KEY:
+                                float(settings.min_score or 0.0), 0.05)
+    st.caption(f"Store: {describe_location(settings)}")
+    st.caption(f"Embedding: {settings.embedding_model}  \nLLM: {settings.llm_model}")
+    if not settings.google_api_key:
         st.warning("GOOGLE_API_KEY is not set - retrieval works, answers will fail.")
 
     st.header("Indexed documents")
@@ -86,9 +87,9 @@ tab_ask, tab_ingest = st.tabs(["Ask", "Ingest"])
 
 # --- ingest -----------------------------------------------------------------------
 with tab_ingest:
-    uploads = st.file_uploader("Documents", type=[e.lstrip(".") for e in config.SUPPORTED_EXTENSIONS],
+    uploads = st.file_uploader("Documents", type=[e.lstrip(".") for e in SUPPORTED_EXTENSIONS],
                                accept_multiple_files=True)
-    font_repair = st.checkbox("PDF font repair", value=config.PDF_FONT_REPAIR,
+    font_repair = st.checkbox("PDF font repair", value=settings.pdf_font_repair,
                               help="Only for PDFs whose text extracts as scrambled glyphs.")
     st.caption(f"Re-ingesting a file with the same name replaces its chunks in '{collection}'.")
     if st.button("Ingest", disabled=not uploads, type="primary"):

@@ -12,8 +12,8 @@ from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
-from rag.errors import GenerationError
-from rag.settings import Settings, default_settings
+from rag_kit.errors import GenerationError
+from rag_kit.settings import Settings, default_settings
 
 logger = logging.getLogger(__name__)
 

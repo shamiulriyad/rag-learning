@@ -6,16 +6,18 @@
     python cli.py search "question"           retrieval only, no LLM call
     python cli.py documents [--json]          files in the collection + chunk counts
     python cli.py delete FILE_NAME            remove one document's chunks
-    python cli.py serve                       FastAPI service (needs requirements-api.txt)
-    python cli.py ui                          Streamlit test UI (needs requirements-ui.txt)
+    python cli.py serve                       FastAPI service (needs rag-kit[api])
+    python cli.py ui                          Streamlit test UI (needs rag-kit[ui])
 
-Works from any directory: paths in .env are resolved from this folder.
+The project (its .env, documents and Qdrant data) is the nearest folder at or
+above the current directory that contains rag-kit.toml, or RAG_PROJECT_DIR.
 Every command takes --collection to work on something other than COLLECTION_NAME.
 """
 
 import argparse
 import contextlib
 import importlib.metadata
+import importlib.resources
 import importlib.util
 import json
 import os
@@ -24,17 +26,17 @@ import subprocess
 import sys
 from pathlib import Path
 
-import config
-from rag.env import export_env_file
-from rag.errors import RagError
-from rag.log import show_progress
+from rag_kit.env import export_env_file
+from rag_kit.errors import RagError
+from rag_kit.log import show_progress
+from rag_kit.settings import Settings, set_default_settings
 
-ROOT = Path(__file__).resolve().parent
+DISTRIBUTION = "rag-kit"
 
 
 def _pipeline(args):
-    from rag.pipeline import Pipeline
-    return Pipeline(collection=args.collection)
+    from rag_kit.pipeline import Pipeline
+    return Pipeline(collection=args.collection, settings=args.settings)
 
 
 def _quiet(args):
@@ -45,58 +47,66 @@ def _quiet(args):
 
 
 # --- check -------------------------------------------------------------------
-# The requirements files are the single source of truth for dependencies.
-REQUIREMENT_FILES = {
-    "requirements.txt": ("core", True),
-    "requirements-api.txt": ("optional: serve", False),
-    "requirements-ui.txt": ("optional: ui", False),
-    "requirements-dev.txt": ("optional: tests", False),
+# The package metadata (pyproject.toml) is the single source of truth for
+# dependencies; each optional group is an extra.
+EXTRA_PURPOSE = {
+    "local": "local embeddings",
+    "gemini": "Gemini",
+    "api": "serve",
+    "ui": "ui",
+    "dev": "tests",
 }
-_REQUIREMENT_NAME = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
-
-
-def requirement_names(path: Path) -> list:
-    """Distribution names listed in a requirements file, in order.
-
-    Skips comments and option lines such as `-r other.txt` (an included file is
-    checked under its own entry in REQUIREMENT_FILES).
-    """
-    names = []
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.split("#", 1)[0].strip()
-        if not line or line.startswith("-"):
-            continue
-        match = _REQUIREMENT_NAME.match(line)
-        if match:
-            names.append(match.group(1))
-    return names
 
 
 def _canonical(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
-def dependency_report(root: Path = ROOT):
-    """(all required installed?, [(status, name, detail), ...])."""
-    ok, rows, seen = True, [], set()
-    for file, (purpose, required) in REQUIREMENT_FILES.items():
-        path = root / file
-        if not path.exists():
-            ok = ok and not required
-            rows.append(("FAIL" if required else "warn", file, "requirements file not found"))
+def requirement_groups(requirements) -> list:
+    """(distribution name, extra or None for core) for each Requires-Dist line
+    that applies here, in order. References to rag-kit itself are skipped."""
+    from packaging.requirements import Requirement
+
+    groups = []
+    for line in requirements:
+        requirement = Requirement(line)
+        if _canonical(requirement.name) == DISTRIBUTION:
             continue
-        for name in requirement_names(path):
-            if _canonical(name) in seen:
-                continue
-            seen.add(_canonical(name))
-            try:
-                version = importlib.metadata.version(name)
-            except importlib.metadata.PackageNotFoundError:
-                ok = ok and not required
-                rows.append(("FAIL" if required else "--", name,
-                             f"not installed ({purpose}): pip install -r {file}"))
-            else:
-                rows.append(("ok", name, f"{version} ({purpose})"))
+        # Core first: a marker without `extra` (e.g. python_version) is true for
+        # every extra too, so it must not be filed under the first one.
+        if requirement.marker is None or requirement.marker.evaluate({"extra": ""}):
+            groups.append((requirement.name, None))
+            continue
+        extras = [extra for extra in EXTRA_PURPOSE
+                  if requirement.marker.evaluate({"extra": extra})]
+        if extras:
+            groups.append((requirement.name, extras[0]))
+    return groups
+
+
+def dependency_report(requirements=None):
+    """(all required installed?, [(status, name, detail), ...])."""
+    if requirements is None:
+        try:
+            requirements = importlib.metadata.requires(DISTRIBUTION) or []
+        except importlib.metadata.PackageNotFoundError:
+            return False, [("FAIL", DISTRIBUTION, "is not installed as a package: "
+                                                  "pip install rag-kit (or pip install -e .)")]
+    ok, rows, seen = True, [], set()
+    for name, extra in requirement_groups(requirements):
+        if _canonical(name) in seen:
+            continue
+        seen.add(_canonical(name))
+        required = extra is None
+        purpose = "core" if required else f"optional: {EXTRA_PURPOSE[extra]}"
+        try:
+            version = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            ok = ok and not required
+            hint = "pip install rag-kit" if required else f'pip install "rag-kit[{extra}]"'
+            rows.append(("FAIL" if required else "--", name, f"not installed ({purpose}): {hint}"))
+        else:
+            rows.append(("ok", name, f"{version} ({purpose})"))
     return ok, rows
 
 
@@ -106,51 +116,65 @@ def cmd_check(args) -> int:
     def line(status: str, label: str, detail: str = "") -> None:
         print(f"  [{status:^4}] {label:<22} {detail}")
 
-    print(f"Config file : {config.ENV_FILE} ({'found' if config.ENV_FILE.exists() else 'MISSING'})")
-    print(f"Python      : {sys.version.split()[0]}")
-    try:
-        config.validate()
-        line("ok", "settings", f"chunk {config.CHUNK_SIZE}/{config.CHUNK_OVERLAP}, "
-                               f"top_k {config.TOP_K}")
-    except RagError as exc:
+    settings = args.settings
+    if settings is None:
         ok = False
-        line("FAIL", "settings", str(exc))
+        print("Project     : not found")
+        line("FAIL", "project", str(args.settings_error))
+    else:
+        env_file = settings.env_file
+        print(f"Project     : {settings.project_dir}")
+        print(f"Config file : {env_file} ({'found' if env_file.exists() else 'MISSING'})")
+    print(f"Python      : {sys.version.split()[0]}")
 
-    line("ok" if config.GOOGLE_API_KEY else "warn", "GOOGLE_API_KEY",
-         "set" if config.GOOGLE_API_KEY else "missing - `ask` and the API cannot answer")
-    line("info", "embedding", f"{config.EMBEDDING_PROVIDER}: {config.EMBEDDING_MODEL}")
-    line("info", "llm", config.LLM_MODEL)
-    line("info", "pdf font repair", "on" if config.PDF_FONT_REPAIR else "off")
-    exported = getattr(args, "exported_env", [])
-    line("info", "env export", f"from .env: {', '.join(exported)} ({len(exported)})"
-         if exported else "nothing exported from .env")
+    if settings is not None:
+        try:
+            settings.validate()
+            line("ok", "settings", f"chunk {settings.chunk_size}/{settings.chunk_overlap}, "
+                                   f"top_k {settings.top_k}")
+        except RagError as exc:
+            ok = False
+            line("FAIL", "settings", str(exc))
+
+        line("ok" if settings.google_api_key else "warn", "GOOGLE_API_KEY",
+             "set" if settings.google_api_key else "missing - `ask` and the API cannot answer")
+        line("info", "embedding", f"{settings.embedding_provider}: {settings.embedding_model}")
+        line("info", "llm", settings.llm_model)
+        line("info", "pdf font repair", "on" if settings.pdf_font_repair else "off")
+        exported = getattr(args, "exported_env", [])
+        line("info", "env export", f"from .env: {', '.join(exported)} ({len(exported)})"
+             if exported else "nothing exported from .env")
 
     deps_ok, rows = dependency_report()
     ok = ok and deps_ok
     for row in rows:
         line(*row)
 
-    from rag.step06_vector_store import (collection_dimension, collection_exists,
-                                         describe_location, get_client)
-    collection = args.collection or config.COLLECTION_NAME
+    if settings is None:
+        print("\nSome required checks failed.")
+        return 1
+
+    from rag_kit.step06_vector_store import (collection_dimension, collection_exists,
+                                             describe_location, get_client)
+    collection = args.collection or settings.collection_name
     client = None
     try:
-        client = get_client(create=False)
-        if collection_exists(client, collection):
+        client = get_client(create=False, settings=settings)
+        if collection_exists(client, collection, settings):
             count = client.count(collection, exact=True).count
             dim = collection_dimension(client, collection)
-            line("ok", "vector store", f"{describe_location()}")
+            line("ok", "vector store", f"{describe_location(settings)}")
             line("ok", "collection", f"'{collection}': {count} vectors, dim {dim}")
             if args.deep:
-                from rag.step05_embedding import detect_dimension, get_embeddings
-                model_dim = detect_dimension(get_embeddings())
+                from rag_kit.step05_embedding import detect_dimension, get_embeddings
+                model_dim = detect_dimension(get_embeddings(settings), settings)
                 match = model_dim == dim
                 ok = ok and match
                 line("ok" if match else "FAIL", "embedding dimension",
                      f"model {model_dim} vs collection {dim}")
         else:
-            line("warn", "collection", f"'{collection}' not found in {describe_location()} "
-                                       "- run `ingest` first")
+            line("warn", "collection", f"'{collection}' not found in "
+                                       f"{describe_location(settings)} - run `ingest` first")
     except RagError as exc:
         line("warn", "vector store", str(exc))
     finally:
@@ -159,9 +183,9 @@ def cmd_check(args) -> int:
 
     if args.llm:
         try:
-            from rag.step10_generate import get_llm
-            reply = get_llm().invoke("Reply with the single word: ok").content
-            line("ok", "llm call", f"{config.LLM_MODEL} replied {str(reply).strip()[:30]!r}")
+            from rag_kit.step10_generate import get_llm
+            reply = get_llm(settings).invoke("Reply with the single word: ok").content
+            line("ok", "llm call", f"{settings.llm_model} replied {str(reply).strip()[:30]!r}")
         except Exception as exc:
             ok = False
             line("FAIL", "llm call", str(exc)[:300])
@@ -172,7 +196,7 @@ def cmd_check(args) -> int:
 
 # --- ingest ------------------------------------------------------------------
 def cmd_ingest(args) -> int:
-    files = args.files or ([args.pdf] if args.pdf else [str(config.PDF_PATH)])
+    files = args.files or [str(args.settings.pdf_path)]
     if args.recreate and len(files) > 1:
         print("--recreate with several files would keep only the last one; "
               "recreate once, then ingest the rest.", file=sys.stderr)
@@ -211,7 +235,7 @@ def _print_chunks(scored_docs, full: bool) -> None:
 
 
 def cmd_ask(args) -> int:
-    from rag.step11_answer import present
+    from rag_kit.step11_answer import present
 
     pipeline = _pipeline(args)
     out = sys.stdout
@@ -259,7 +283,7 @@ def cmd_search(args) -> int:
     finally:
         pipeline.close()
     if args.json:
-        from rag.step11_answer import build_sources
+        from rag_kit.step11_answer import build_sources
         print(json.dumps(build_sources(scored_docs), ensure_ascii=False, indent=2))
     elif not scored_docs:
         print("No chunks retrieved.")
@@ -294,7 +318,7 @@ def cmd_delete(args) -> int:
     name = Path(args.file_name).name
     if not args.yes:
         reply = input(f"Delete every chunk of '{name}' from "
-                      f"'{args.collection or config.COLLECTION_NAME}'? [y/N] ")
+                      f"'{args.collection or args.settings.collection_name}'? [y/N] ")
         if reply.strip().lower() not in {"y", "yes"}:
             print("Cancelled.")
             return 1
@@ -309,50 +333,52 @@ def cmd_delete(args) -> int:
 
 
 # --- serve / ui --------------------------------------------------------------
-def _require(module: str, requirements: str) -> bool:
+def _require(module: str, extra: str) -> bool:
     if importlib.util.find_spec(module) is None:
-        print(f"error: {module} is not installed. Run: pip install -r {requirements}",
+        print(f'error: {module} is not installed. Run: pip install "rag-kit[{extra}]"',
               file=sys.stderr)
         return False
     return True
 
 
-def _child_env(args, what: str):
-    """Environment for the server process. --collection overrides COLLECTION_NAME for
-    that process only (environment variables win over .env); .env is never edited."""
-    collection = args.collection or config.COLLECTION_NAME
+def _child_env(args, what: str) -> dict:
+    """Environment for the server process: this project (RAG_PROJECT_DIR) and,
+    with --collection, COLLECTION_NAME for that process only (environment
+    variables win over .env). .env is never edited."""
+    collection = args.collection or args.settings.collection_name
     source = "--collection" if args.collection else "COLLECTION_NAME"
     print(f"{what} collection '{collection}' (from {source})", flush=True)
-    if not args.collection:
-        return None  # inherit unchanged
-    return {**os.environ, "COLLECTION_NAME": args.collection}
+    env = {**os.environ, "RAG_PROJECT_DIR": str(args.settings.project_dir)}
+    if args.collection:
+        env["COLLECTION_NAME"] = args.collection
+    return env
 
 
 def cmd_serve(args) -> int:
-    if not (_require("fastapi", "requirements-api.txt") and
-            _require("uvicorn", "requirements-api.txt")):
+    if not (_require("fastapi", "api") and _require("uvicorn", "api")):
         return 1
     env = _child_env(args, "Serving")
     # One worker: embedded Qdrant allows a single process.
-    return subprocess.call([sys.executable, "-m", "uvicorn", "main:app", "--app-dir", str(ROOT),
+    return subprocess.call([sys.executable, "-m", "uvicorn", "rag_kit.api:app",
                             "--host", args.host, "--port", str(args.port), "--workers", "1"],
                            env=env)
 
 
 def cmd_ui(args) -> int:
-    if not _require("streamlit", "requirements-ui.txt"):
+    if not _require("streamlit", "ui"):
         return 1
     env = _child_env(args, "UI starts on")
-    return subprocess.call([sys.executable, "-m", "streamlit", "run",
-                            str(ROOT / "streamlit_app.py"), "--server.port", str(args.port)],
-                           env=env)
+    app = importlib.resources.files("rag_kit.ui").joinpath("app.py")
+    with importlib.resources.as_file(app) as path:
+        return subprocess.call([sys.executable, "-m", "streamlit", "run", str(path),
+                                "--server.port", str(args.port)], env=env)
 
 
 # --- argument parsing --------------------------------------------------------
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="cli.py", description="Standalone RAG toolkit.")
+    parser = argparse.ArgumentParser(prog="rag-kit", description="Standalone RAG toolkit.")
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--collection", help=f"Qdrant collection (default: {config.COLLECTION_NAME})")
+    common.add_argument("--collection", help="Qdrant collection (default: COLLECTION_NAME)")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("check", parents=[common], help="validate config, dependencies and store")
@@ -363,7 +389,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("ingest", parents=[common], help="index documents (.pdf, .txt, .md)")
     p.add_argument("files", nargs="*", help="files to ingest (default: PDF_PATH from .env)")
-    p.add_argument("--pdf", help=argparse.SUPPRESS)  # original ingest.py flag
     p.add_argument("--recreate", action="store_true",
                    help="drop the whole collection first (after changing the embedding model)")
     p.add_argument("--font-repair", choices=["on", "off"],
@@ -374,7 +399,7 @@ def build_parser() -> argparse.ArgumentParser:
                              ("search", cmd_search, "retrieval only - inspect chunks, no LLM")):
         p = sub.add_parser(name, parents=[common], help=text)
         p.add_argument("question", nargs="*" if name == "ask" else "+")
-        p.add_argument("-k", "--top-k", type=int, help=f"chunks to retrieve (default {config.TOP_K})")
+        p.add_argument("-k", "--top-k", type=int, help="chunks to retrieve (default: TOP_K)")
         p.add_argument("--min-score", type=float, help="drop chunks scoring below this")
         p.add_argument("--json", action="store_true", help="machine-readable output")
         if name == "ask":
@@ -407,9 +432,19 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     show_progress()  # step progress to stdout (stderr under --json, see _quiet)
-    # Before any command: HF_HOME, proxies etc. from .env must be in the environment
-    # before Hugging Face is first imported. Child processes (serve/ui) inherit them.
-    args.exported_env = export_env_file(config.SETTINGS)
+    try:
+        args.settings = Settings.load()
+    except RagError as exc:
+        if args.command != "check":
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        args.settings, args.settings_error = None, exc  # `check` reports it
+    else:
+        set_default_settings(args.settings)
+        # Before any command: HF_HOME, proxies etc. from .env must be in the
+        # environment before Hugging Face is first imported. Child processes
+        # (serve/ui) inherit them. See rag_kit/env.py for the allow-list.
+        args.exported_env = export_env_file(args.settings)
     try:
         return args.func(args)
     except RagError as exc:

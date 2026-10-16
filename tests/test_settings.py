@@ -1,13 +1,13 @@
-"""rag.settings.Settings: loading without side effects, explicit injection."""
+"""rag_kit.settings.Settings: loading without side effects, discovery, explicit injection."""
 
 import os
 from pathlib import Path
 
 import pytest
 
-from rag.errors import ConfigError
-from rag.pipeline import Pipeline
-from rag.settings import PROJECT_MARKER, Settings, find_project_dir
+from rag_kit.errors import ConfigError, RagError
+from rag_kit.pipeline import Pipeline
+from rag_kit.settings import PROJECT_MARKER, Settings, find_project_dir
 from tests.conftest import make_text_file
 
 
@@ -75,6 +75,38 @@ def test_secrets_are_not_in_repr(tmp_path):
                                                 "QDRANT_API_KEY": "secret-qdrant-value"})
     assert settings.google_api_key == "secret-google-value"
     assert "secret-" not in repr(settings)
+
+
+def test_absolute_paths_are_kept(tmp_path):
+    settings = Settings.load(tmp_path, environ={"QDRANT_PATH": str(tmp_path / "store"),
+                                                "PDF_PATH": str(tmp_path / "a.pdf")})
+    assert settings.qdrant_path == tmp_path / "store"
+    assert settings.pdf_path == tmp_path / "a.pdf"
+
+
+def test_missing_api_key_is_actionable(tmp_path):
+    settings = Settings.load(tmp_path, environ={})
+    assert settings.google_api_key is None
+    with pytest.raises(ConfigError, match="GOOGLE_API_KEY is not set"):
+        settings.require_api_key()
+    assert issubclass(ConfigError, RagError)
+
+
+@pytest.mark.parametrize("env, message", [
+    ({"EMBEDDING_PROVIDER": "openai"}, "EMBEDDING_PROVIDER must be"),
+    ({"CHUNK_SIZE": "100", "CHUNK_OVERLAP": "100"}, "CHUNK_OVERLAP < CHUNK_SIZE"),
+    ({"TOP_K": "0"}, "TOP_K must be at least 1"),
+])
+def test_validate_rejects_bad_settings(tmp_path, env, message):
+    with pytest.raises(ConfigError, match=message):
+        Settings.load(tmp_path, environ=env).validate()
+
+
+def test_bool_and_min_score_parsing(tmp_path):
+    settings = Settings.load(tmp_path, environ={"PDF_FONT_REPAIR": "true", "MIN_SCORE": "0.35"})
+    assert settings.pdf_font_repair is True
+    assert settings.min_score == pytest.approx(0.35)
+    assert Settings.load(tmp_path, environ={}).pdf_font_repair is False
 
 
 def test_invalid_number_is_reported_on_load(tmp_path):
@@ -163,15 +195,17 @@ def test_load_with_missing_explicit_project_dir_is_an_error(tmp_path):
 
 
 def test_project_inside_the_package_is_refused():
-    import rag
+    import rag_kit
 
-    package_dir = Path(rag.__file__).resolve().parent
+    package_dir = Path(rag_kit.__file__).resolve().parent
     with pytest.raises(ConfigError, match="inside the installed rag-kit package"):
         Settings.load(package_dir, environ={})
     with pytest.raises(ConfigError, match="inside the installed rag-kit package"):
         find_project_dir(environ={"RAG_PROJECT_DIR": str(package_dir)})
 
 
+@pytest.mark.skipif(not (Path(__file__).resolve().parents[1] / ".git").exists(),
+                    reason="only meaningful in the git checkout")
 def test_this_checkout_is_a_project():
     from tests.conftest import ROOT
 

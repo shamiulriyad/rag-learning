@@ -1,7 +1,7 @@
 """Optional HTTP API over the pipeline (steps 7-11).
 
-    pip install -r requirements-api.txt
-    python cli.py serve                    # or: uvicorn main:app --port 8000
+    pip install "rag-kit[api]"
+    python cli.py serve                    # or: uvicorn rag_kit.api:app --port 8000
 
     GET  /health                     -> {"status": "ok", "ready": bool}
     POST /query  {question, top_k?}  -> {"answer": str, "status": str,
@@ -13,7 +13,8 @@ Questions longer than QUESTION_MAX_CHARS are rejected with 422.
 
 `create_app(settings=..., pipeline=...)` builds an independent service, e.g.
 for tests or for embedding it in another program; `app` is the default one,
-configured from .env.
+configured from the project's .env (found from RAG_PROJECT_DIR or the current
+folder when the first request or the startup warm-up needs it).
 
 Qdrant in local mode allows only one process at a time - run ingestion first,
 then start this with a single worker. The service binds to 127.0.0.1 unless
@@ -29,14 +30,14 @@ from typing import List, Optional
 from fastapi import Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from rag.env import export_env_file
-from rag.errors import RagError
-from rag.log import show_progress
-from rag.pipeline import Pipeline
-from rag.settings import Settings, default_settings
-from rag.step11_answer import strip_markers  # noqa: F401 - re-exported for callers
+from rag_kit.env import export_env_file
+from rag_kit.errors import RagError
+from rag_kit.log import show_progress
+from rag_kit.pipeline import Pipeline
+from rag_kit.settings import Settings, default_settings
+from rag_kit.step11_answer import strip_markers  # noqa: F401 - re-exported for callers
 
-logger = logging.getLogger("rag.api")  # under "rag" so show_progress() prints it
+logger = logging.getLogger("rag_kit.api")  # under "rag_kit" so show_progress() prints it
 
 # Bounds the cost of a single request (embedding + LLM prompt size).
 QUESTION_MAX_CHARS = 4000
@@ -55,7 +56,10 @@ def _pipeline_for(app: FastAPI) -> Pipeline:
 
 def get_pipeline(request: Request) -> Pipeline:
     """FastAPI dependency; tests swap it via app.dependency_overrides."""
-    return _pipeline_for(request.app)
+    try:
+        return _pipeline_for(request.app)
+    except RagError as exc:  # e.g. no rag-kit project found
+        raise HTTPException(status_code=503, detail=f"RAG service not ready: {exc}") from exc
 
 
 @asynccontextmanager
@@ -65,7 +69,7 @@ async def lifespan(app: FastAPI):
     # stays green; /query then returns a clear 503.
     show_progress()
     if app.state.export_env:
-        # Before the pipeline loads the embedding model (see rag/env.py).
+        # Before the pipeline loads the embedding model (see rag_kit/env.py).
         try:
             exported = export_env_file(app.state.settings or default_settings())
             if exported:
@@ -136,7 +140,7 @@ def create_app(settings: Optional[Settings] = None, pipeline: Optional[Pipeline]
     a pipeline passed in is left for the caller to close.
 
     export_env=True copies allow-listed .env keys (HF_HOME, proxies, ...) into
-    os.environ at startup; only the default `app` does that (see rag/env.py)."""
+    os.environ at startup; only the default `app` does that (see rag_kit/env.py)."""
     app = FastAPI(title="RAG toolkit service", lifespan=lifespan)
     app.state.settings = settings
     app.state.export_env = export_env

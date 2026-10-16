@@ -3,11 +3,11 @@
 import pytest
 from langchain_core.documents import Document
 
-from rag.errors import ExtractionError, UnsupportedFileError
-from rag.step01_load_pdf import load_document
-from rag.step02_extract_text import extract_text
-from rag.step03_clean_text import clean_documents, clean_text
-from rag.step04_chunking import chunk_documents
+from rag_kit.errors import ExtractionError, UnsupportedFileError
+from rag_kit.step01_load_pdf import load_document
+from rag_kit.step02_extract_text import extract_text
+from rag_kit.step03_clean_text import clean_documents, clean_text
+from rag_kit.step04_chunking import chunk_documents
 
 # --- step 1 -------------------------------------------------------------------
 
@@ -58,7 +58,7 @@ def test_extract_pdf_keeps_page_numbers_and_metadata(tmp_path):
 
 
 def test_font_repair_is_off_by_default_and_used_only_when_asked(tmp_path, monkeypatch):
-    import rag.step02_extract_text as step02
+    import rag_kit.step02_extract_text as step02
     calls = []
     monkeypatch.setattr(step02, "repair_page", lambda page: calls.append(page) or "repaired text")
     pdf = _make_pdf(tmp_path / "x.pdf", ["Plain text page."])

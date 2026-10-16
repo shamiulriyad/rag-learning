@@ -17,19 +17,19 @@ from typing import List, Optional, Tuple
 
 from langchain_core.documents import Document
 
-from rag.errors import EmptyDocumentError
-from rag.settings import Settings, default_settings
-from rag.step01_load_pdf import load_document
-from rag.step02_extract_text import extract_text
-from rag.step03_clean_text import clean_documents
-from rag.step04_chunking import chunk_documents
-from rag.step05_embedding import get_embeddings
-from rag.step06_vector_store import (delete_document, get_client, list_documents,
+from rag_kit.errors import EmptyDocumentError
+from rag_kit.settings import Settings, default_settings
+from rag_kit.step01_load_pdf import load_document
+from rag_kit.step02_extract_text import extract_text
+from rag_kit.step03_clean_text import clean_documents
+from rag_kit.step04_chunking import chunk_documents
+from rag_kit.step05_embedding import get_embeddings
+from rag_kit.step06_vector_store import (delete_document, get_client, list_documents,
                                      open_vector_store, store_chunks)
-from rag.step08_query_embedding import embed_question
-from rag.step09_retrieve import retrieve
-from rag.step10_generate import NO_RESULTS_ANSWER, generate_answer, get_llm
-from rag.step11_answer import build_sources, strip_markers
+from rag_kit.step08_query_embedding import embed_question
+from rag_kit.step09_retrieve import retrieve
+from rag_kit.step10_generate import NO_RESULTS_ANSWER, generate_answer, get_llm
+from rag_kit.step11_answer import build_sources, strip_markers
 
 ScoredDocs = List[Tuple[Document, float]]
 

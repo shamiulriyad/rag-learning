@@ -11,8 +11,8 @@ Two providers, chosen by EMBEDDING_PROVIDER in .env:
 import logging
 from typing import Optional
 
-from rag.errors import EmbeddingProviderError
-from rag.settings import Settings, default_settings
+from rag_kit.errors import EmbeddingProviderError
+from rag_kit.settings import Settings, default_settings
 
 logger = logging.getLogger(__name__)
 

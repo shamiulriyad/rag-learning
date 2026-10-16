@@ -27,12 +27,12 @@ from typing import Mapping, Optional
 
 from dotenv import dotenv_values
 
-from rag.errors import ConfigError
+from rag_kit.errors import ConfigError
 
 SUPPORTED_EXTENSIONS = (".pdf", ".txt", ".md")
 
-# Every variable Settings.load() reads. rag.env never exports these to
-# os.environ (see rag/env.py); RAG_* control variables are excluded there too.
+# Every variable Settings.load() reads. rag_kit.env never exports these to
+# os.environ (see rag_kit/env.py); RAG_* control variables are excluded there too.
 SETTING_NAMES = frozenset({
     "PDF_PATH", "PDF_FONT_REPAIR", "CHUNK_SIZE", "CHUNK_OVERLAP", "GOOGLE_API_KEY",
     "EMBEDDING_PROVIDER", "EMBEDDING_MODEL", "EMBEDDING_DIM", "EMBED_BATCH_SIZE", "EMBED_SLEEP",
@@ -119,7 +119,7 @@ class Settings:
     # Default file for `ingest` when no path is given on the command line.
     pdf_path: Path
     # Repairs PDFs whose subset fonts have no ToUnicode map (see
-    # rag/pdf_font_repair.py). Off by default: ordinary PDFs do not need it.
+    # rag_kit/pdf_font_repair.py). Off by default: ordinary PDFs do not need it.
     pdf_font_repair: bool = False
 
     # --- Step 4: chunking ---------------------------------------------------
@@ -239,11 +239,9 @@ def set_default_settings(settings: Settings) -> None:
 
 
 def default_settings() -> Settings:
-    """The settings registered with set_default_settings().
-
-    In this checkout, importing `config` registers the project's .env.
-    Packaging replaces this with project-directory discovery.
-    """
+    """The settings registered with set_default_settings(); if none were, the
+    project found by find_project_dir() is loaded once and kept."""
+    global _default
     if _default is None:
-        import config  # noqa: F401 - registers its settings on import
+        _default = Settings.load()
     return _default

@@ -29,9 +29,9 @@ from typing import List, Optional
 
 from langchain_core.documents import Document
 
-from rag.errors import ExtractionError
-from rag.pdf_font_repair import is_readable, repair_page, text_quality
-from rag.settings import Settings, default_settings
+from rag_kit.errors import ExtractionError
+from rag_kit.pdf_font_repair import is_readable, repair_page, text_quality
+from rag_kit.settings import Settings, default_settings
 
 logger = logging.getLogger(__name__)
 

@@ -1,4 +1,0 @@
-# Tests (python -m pytest). Includes the API extra so its tests can run.
--r requirements-api.txt
-pytest>=8.0.0
-httpx>=0.27.0

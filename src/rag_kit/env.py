@@ -28,7 +28,7 @@ from typing import List, MutableMapping, Optional
 
 from dotenv import dotenv_values
 
-from rag.settings import SETTING_NAMES, Settings
+from rag_kit.settings import SETTING_NAMES, Settings
 
 logger = logging.getLogger(__name__)
 

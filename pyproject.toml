@@ -1,0 +1,101 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "rag-kit"
+version = "0.1.0"
+description = "A reusable, developer-focused RAG toolkit for document ingestion, retrieval, and source-grounded answers."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11,<3.13"
+authors = [{ name = "Riyad" }]
+keywords = ["rag", "retrieval-augmented-generation", "qdrant", "langchain", "pdf", "embeddings"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Text Processing :: Indexing",
+    "Typing :: Typed",
+]
+# Core: ingestion, chunking, Qdrant storage and retrieval. Embedding and LLM
+# providers are extras, so a core install never pulls in torch or the Gemini SDK.
+dependencies = [
+    "langchain-core>=1.6.9,<2",
+    "langchain-text-splitters>=1.1,<2",
+    "langchain-qdrant>=1.1,<2",
+    "qdrant-client>=1.19,<2",
+    "pymupdf>=1.28,<2",
+    "python-dotenv>=1.2,<2",
+    "packaging>=24",
+]
+
+[project.optional-dependencies]
+# Local embeddings (default EMBEDDING_PROVIDER=huggingface, BAAI/bge-m3). Pulls in
+# torch; on Linux install the CPU build first to avoid CUDA wheels (see README).
+local = [
+    "langchain-huggingface>=1.2,<2",
+    "sentence-transformers>=6.1,<7",
+]
+# Gemini embeddings (EMBEDDING_PROVIDER=google) and answer generation.
+gemini = [
+    "langchain-google-genai>=4.4,<5",
+]
+api = [
+    "fastapi>=0.143,<1",
+    "uvicorn[standard]>=0.54,<1",
+]
+ui = [
+    "streamlit>=1.65,<2",
+]
+dev = [
+    "rag-kit[api]",
+    "pytest>=9.1,<10",
+    "httpx>=0.28,<1",
+    "ruff>=0.17,<1",
+]
+all = [
+    "rag-kit[local,gemini,api,ui]",
+]
+
+[project.scripts]
+rag-kit = "rag_kit.cli:main"
+
+[project.urls]
+Repository = "https://github.com/shamiulriyad/rag-learning"
+Issues = "https://github.com/shamiulriyad/rag-learning/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/rag_kit"]
+
+[tool.hatch.build.targets.sdist]
+# Allow-list: user data (.env, qdrant_data, uploads, data/) and the sample PDF
+# can never end up in a distribution.
+only-include = [
+    "src/rag_kit",
+    "tests",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "pyproject.toml",
+]
+exclude = [
+    "**/__pycache__",
+    "**/*.py[cod]",
+    "**/*.pdf",
+    "**/.env",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+    "integration: uses the real embedding model and the local Qdrant store (opt in with RAG_RUN_INTEGRATION=1)",
+    "gemini: makes a real Gemini API call that uses quota (opt in with RAG_RUN_GEMINI=1)",
+]
+filterwarnings = ["ignore::DeprecationWarning"]

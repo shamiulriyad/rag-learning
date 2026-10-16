@@ -3,10 +3,10 @@
 import pytest
 from langchain_core.documents import Document
 
-from rag.errors import EmptyDocumentError, GenerationError
-from rag.pipeline import Pipeline
-from rag.step10_generate import NO_RESULTS_ANSWER, format_context, generate_answer
-from rag.step11_answer import build_sources, present, strip_markers
+from rag_kit.errors import EmptyDocumentError, GenerationError
+from rag_kit.pipeline import Pipeline
+from rag_kit.step10_generate import NO_RESULTS_ANSWER, format_context, generate_answer
+from rag_kit.step11_answer import build_sources, present, strip_markers
 from tests.conftest import make_text_file
 
 

@@ -1,20 +1,35 @@
-"""CLI behaviour, including running from a different working directory."""
+"""CLI behaviour, including how the project folder is found."""
 
+import importlib.metadata
 import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
-import cli
+import rag_kit
+from rag_kit import cli
+from rag_kit.settings import PROJECT_MARKER, default_settings
 from tests.conftest import ROOT
 
 
-def _run(args, cwd, env_file):
-    env = {**os.environ, "RAG_ENV_FILE": str(env_file), "PYTHONIOENCODING": "utf-8"}
-    return subprocess.run([sys.executable, str(ROOT / "cli.py"), *args], cwd=cwd, env=env,
+def _run(args, cwd, env_file, project=None):
+    env = {k: v for k, v in os.environ.items() if k != "RAG_PROJECT_DIR"}
+    env.update({"RAG_ENV_FILE": str(env_file), "PYTHONIOENCODING": "utf-8"})
+    if project is not None:
+        env["RAG_PROJECT_DIR"] = str(project)
+    return subprocess.run([sys.executable, "-m", "rag_kit", *args], cwd=cwd, env=env,
                           capture_output=True, text=True, timeout=120)
+
+
+def _make_project(tmp_path, env_text=""):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / PROJECT_MARKER).write_text("", encoding="utf-8")
+    (project / ".env").write_text(env_text, encoding="utf-8")
+    return project.resolve()
 
 
 def test_help_works_from_another_directory(tmp_path):
@@ -23,19 +38,46 @@ def test_help_works_from_another_directory(tmp_path):
     assert "ingest" in result.stdout and "search" in result.stdout
 
 
-def test_relative_store_path_is_not_created_in_cwd(tmp_path):
-    env_file = tmp_path / "test.env"
-    env_file.write_text("QDRANT_PATH=./definitely_missing_store_for_tests\n", encoding="utf-8")
+def test_relative_store_path_is_resolved_from_the_project_not_cwd(tmp_path):
+    project = _make_project(tmp_path, "QDRANT_PATH=./definitely_missing_store_for_tests\n")
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
 
-    result = _run(["documents"], cwd=elsewhere, env_file=env_file)
+    result = _run(["documents"], cwd=elsewhere, env_file=project / ".env", project=project)
 
     assert result.returncode == 1
     assert "No local Qdrant store" in result.stderr
-    assert str(ROOT) in result.stderr  # resolved from the project, not the cwd
+    assert str(project / "definitely_missing_store_for_tests") in result.stderr
     assert not (elsewhere / "definitely_missing_store_for_tests").exists()
-    assert not (ROOT / "definitely_missing_store_for_tests").exists()
+    assert not (project / "definitely_missing_store_for_tests").exists()
+
+
+def test_project_is_found_from_a_subfolder(tmp_path):
+    project = _make_project(tmp_path, "QDRANT_PATH=./definitely_missing_store_for_tests\n")
+    subfolder = project / "docs" / "notes"
+    subfolder.mkdir(parents=True)
+
+    result = _run(["documents"], cwd=subfolder, env_file=project / ".env")
+
+    assert result.returncode == 1
+    assert str(project / "definitely_missing_store_for_tests") in result.stderr
+    assert not (subfolder / "definitely_missing_store_for_tests").exists()
+
+
+def test_without_a_project_commands_fail_clearly_and_create_nothing(tmp_path):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+
+    documents = _run(["documents"], cwd=empty, env_file=empty / "none.env")
+    check = _run(["check"], cwd=empty, env_file=empty / "none.env")
+
+    assert documents.returncode == 1
+    assert "No rag-kit project found" in documents.stderr
+    assert "--project" in documents.stderr and "RAG_PROJECT_DIR" in documents.stderr
+    assert check.returncode == 1
+    assert "Project     : not found" in check.stdout
+    assert "langchain-core" in check.stdout  # the dependency report still runs
+    assert list(empty.iterdir()) == []
 
 
 def test_recreate_refuses_multiple_files(capsys):
@@ -53,13 +95,13 @@ def test_ingest_reports_unsupported_file(tmp_path, capsys, monkeypatch):
             pass
 
         def ingest(self, path, **kw):
-            from rag.step01_load_pdf import load_document
+            from rag_kit.step01_load_pdf import load_document
             load_document(path)
 
         def close(self):
             pass
 
-    monkeypatch.setattr("rag.pipeline.Pipeline", NoStore)
+    monkeypatch.setattr("rag_kit.pipeline.Pipeline", NoStore)
     assert cli.main(["ingest", str(bad)]) == 1
     assert "Unsupported file type '.xlsx'" in capsys.readouterr().err
 
@@ -75,7 +117,7 @@ def test_ask_rejects_empty_question_via_pipeline(monkeypatch, capsys):
         def close(self):
             pass
 
-    monkeypatch.setattr("rag.pipeline.Pipeline", EmptyQuestion)
+    monkeypatch.setattr("rag_kit.pipeline.Pipeline", EmptyQuestion)
     assert cli.main(["ask", " "]) == 2
     assert "Question is empty" in capsys.readouterr().err
 
@@ -94,54 +136,54 @@ def test_json_mode_keeps_stdout_pure(monkeypatch, capsys):
         def close(self):
             pass
 
-    monkeypatch.setattr("rag.pipeline.Pipeline", Noisy)
+    monkeypatch.setattr("rag_kit.pipeline.Pipeline", Noisy)
     assert cli.main(["search", "q", "--json"]) == 0
     captured = capsys.readouterr()
     assert json.loads(captured.out)[0]["file"] == "a.md"
     assert "[9] Retrieved" in captured.err
 
 
-# --- dependency check: derived from the requirements files ---------------------
+# --- dependency check: derived from the package metadata (pyproject extras) -----
 
 
-def test_requirement_names_parses_real_world_lines(tmp_path):
-    req = tmp_path / "requirements.txt"
-    req.write_text("# comment\n-r base.txt\n\nuvicorn[standard]>=0.30.0\n"
-                   "langchain-core>=0.3.0  # inline\nqdrant_client==1.9\n", encoding="utf-8")
-    assert cli.requirement_names(req) == ["uvicorn", "langchain-core", "qdrant_client"]
+def test_requirement_groups_reads_extras_and_skips_self_references():
+    requirements = [
+        "langchain-core<2,>=1.6.9",
+        'fastapi<1,>=0.143; extra == "api"',
+        'rag-kit[api]; extra == "dev"',
+        'pytest<10,>=9.1; extra == "dev"',
+        'tomli>=2; python_version < "3.0"',
+        'typing-extensions>=4; python_version >= "3.8"',
+        'streamlit<2,>=1.65; extra == "ui"',
+    ]
+    assert cli.requirement_groups(requirements) == [
+        ("langchain-core", None), ("fastapi", "api"), ("pytest", "dev"),
+        ("typing-extensions", None), ("streamlit", "ui"),
+    ]
 
 
-def test_dependency_report_covers_every_requirements_file():
+def test_dependency_report_covers_every_declared_requirement():
+    declared = cli.requirement_groups(importlib.metadata.requires("rag-kit"))
     _ok, rows = cli.dependency_report()
     names = {name for _status, name, _detail in rows}
-    for file in cli.REQUIREMENT_FILES:
-        for name in cli.requirement_names(ROOT / file):
-            assert name in names, f"{name} from {file} is not checked"
+
+    assert {extra for _name, extra in declared} == {None, "local", "gemini", "api", "ui", "dev"}
+    for name, extra in declared:
+        assert name in names, f"{name} ({extra or 'core'}) is not checked"
 
 
-def _fake_project(tmp_path, core, api=""):
-    (tmp_path / "requirements.txt").write_text(core, encoding="utf-8")
-    (tmp_path / "requirements-api.txt").write_text(f"-r requirements.txt\n{api}", encoding="utf-8")
-    (tmp_path / "requirements-ui.txt").write_text("", encoding="utf-8")
-    (tmp_path / "requirements-dev.txt").write_text("", encoding="utf-8")
-    return tmp_path
-
-
-def test_missing_core_dependency_fails(tmp_path):
-    root = _fake_project(tmp_path, "pytest\nno-such-package-xyz>=1\n")
-    ok, rows = cli.dependency_report(root)
+def test_missing_core_dependency_fails():
+    ok, rows = cli.dependency_report(["pytest", "no-such-package-xyz>=1"])
     assert not ok
-    assert ("FAIL", "no-such-package-xyz",
-            "not installed (core): pip install -r requirements.txt") in rows
+    assert ("FAIL", "no-such-package-xyz", "not installed (core): pip install rag-kit") in rows
     assert rows[0][0] == "ok" and rows[0][1] == "pytest"
 
 
-def test_missing_optional_dependency_only_warns(tmp_path):
-    root = _fake_project(tmp_path, "pytest\n", api="no-such-package-xyz\n")
-    ok, rows = cli.dependency_report(root)
+def test_missing_optional_dependency_only_warns():
+    ok, rows = cli.dependency_report(["pytest", 'no-such-package-xyz; extra == "api"'])
     assert ok
     assert ("--", "no-such-package-xyz",
-            "not installed (optional: serve): pip install -r requirements-api.txt") in rows
+            'not installed (optional: serve): pip install "rag-kit[api]"') in rows
 
 
 # --- serve / ui honour --collection for the child process only ------------------
@@ -163,8 +205,9 @@ def test_server_commands_pass_collection_to_child_only(command, captured_launch,
 
     [(cmd, env)] = captured_launch
     assert env["COLLECTION_NAME"] == "experiments"
+    assert env["RAG_PROJECT_DIR"] == str(ROOT)
     assert os.environ.get("COLLECTION_NAME") == before  # this process is untouched
-    assert cli.config.COLLECTION_NAME == "pdf_rag"
+    assert default_settings().collection_name == "pdf_rag"
     assert "collection 'experiments' (from --collection)" in capsys.readouterr().out
 
 
@@ -172,8 +215,27 @@ def test_server_commands_pass_collection_to_child_only(command, captured_launch,
 def test_server_commands_default_to_configured_collection(command, captured_launch, capsys):
     assert cli.main([command]) == 0
     [(cmd, env)] = captured_launch
-    assert env is None  # inherits the environment; .env decides
+    # The child gets this project; COLLECTION_NAME is left to .env / the environment.
+    assert env["RAG_PROJECT_DIR"] == str(ROOT)
+    assert env.get("COLLECTION_NAME") == os.environ.get("COLLECTION_NAME")
     assert "collection 'pdf_rag' (from COLLECTION_NAME)" in capsys.readouterr().out
+
+
+def test_serve_runs_the_packaged_app(captured_launch):
+    assert cli.main(["serve", "--port", "8123"]) == 0
+    [(cmd, _env)] = captured_launch
+    assert cmd[1:4] == ["-m", "uvicorn", "rag_kit.api:app"]
+    assert cmd[cmd.index("--port") + 1] == "8123"
+    assert cmd[-2:] == ["--workers", "1"]
+
+
+def test_ui_runs_the_packaged_streamlit_app(captured_launch):
+    assert cli.main(["ui"]) == 0
+    [(cmd, _env)] = captured_launch
+    assert cmd[1:4] == ["-m", "streamlit", "run"]
+    app = Path(cmd[4])
+    assert app.is_file() and app.name == "app.py"
+    assert Path(rag_kit.__file__).resolve().parent / "ui" == app.resolve().parent
 
 
 # --- documents --json -------------------------------------------------------------
@@ -192,7 +254,7 @@ def test_documents_json_schema(monkeypatch, capsys):
         def close(self):
             pass
 
-    monkeypatch.setattr("rag.pipeline.Pipeline", TwoDocs)
+    monkeypatch.setattr("rag_kit.pipeline.Pipeline", TwoDocs)
     assert cli.main(["documents", "--json"]) == 0
     assert json.loads(capsys.readouterr().out) == {
         "collection": "pdf_rag",

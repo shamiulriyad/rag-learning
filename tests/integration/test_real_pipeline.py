@@ -32,9 +32,10 @@ pytestmark = [
 
 def run_cli(*args, cwd=ROOT, extra_env=None):
     env = {k: v for k, v in os.environ.items() if k not in ("RAG_ENV_FILE", "RAG_API_WARMUP")}
+    env["RAG_PROJECT_DIR"] = str(ROOT)  # the checkout, whatever the working directory
     env["PYTHONIOENCODING"] = "utf-8"
     env.update(extra_env or {})  # real env vars take priority over .env
-    return subprocess.run([sys.executable, str(ROOT / "cli.py"), *args], cwd=cwd, env=env,
+    return subprocess.run([sys.executable, "-m", "rag_kit", *args], cwd=cwd, env=env,
                           capture_output=True, text=True, timeout=900)
 
 

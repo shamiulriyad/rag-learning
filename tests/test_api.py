@@ -5,9 +5,9 @@ import pytest
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
-import main  # noqa: E402
-from rag.errors import VectorStoreError  # noqa: E402
-from rag.pipeline import AnswerResult  # noqa: E402
+from rag_kit import api  # noqa: E402
+from rag_kit.errors import VectorStoreError  # noqa: E402
+from rag_kit.pipeline import AnswerResult  # noqa: E402
 
 SOURCES = [{"marker": "S1", "page": 3, "file": "g.pdf", "score": 0.8, "chunk_id": 2,
             "doc_id": "d", "text": "Nouns name things."}]
@@ -27,14 +27,14 @@ class StubPipeline:
 @pytest.fixture
 def client_with():
     def _make(stub):
-        main.app.dependency_overrides[main.get_pipeline] = lambda: stub
-        return TestClient(main.app)  # no `with`: lifespan warm-up is skipped
+        api.app.dependency_overrides[api.get_pipeline] = lambda: stub
+        return TestClient(api.app)  # no `with`: lifespan warm-up is skipped
     yield _make
-    main.app.dependency_overrides.clear()
+    api.app.dependency_overrides.clear()
 
 
 def test_health():
-    response = TestClient(main.app).get("/health")
+    response = TestClient(api.app).get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "ready": False}
 
@@ -82,7 +82,7 @@ def test_query_reports_pipeline_errors_as_503(client_with):
 
 def test_question_at_the_limit_is_accepted(client_with):
     stub = StubPipeline(AnswerResult("q", "Nothing relevant.", "no_results", []))
-    question = "x" * main.QUESTION_MAX_CHARS
+    question = "x" * api.QUESTION_MAX_CHARS
     assert client_with(stub).post("/query", json={"question": question}).status_code == 200
     assert stub.calls == [(question, None)]
 
@@ -90,7 +90,7 @@ def test_question_at_the_limit_is_accepted(client_with):
 def test_question_over_the_limit_is_rejected_before_the_pipeline(client_with):
     stub = StubPipeline()
     response = client_with(stub).post(
-        "/query", json={"question": "x" * (main.QUESTION_MAX_CHARS + 1)})
+        "/query", json={"question": "x" * (api.QUESTION_MAX_CHARS + 1)})
     assert response.status_code == 422
     assert stub.calls == []
 
@@ -101,16 +101,16 @@ def test_question_over_the_limit_is_rejected_before_the_pipeline(client_with):
 def test_factory_apps_use_their_own_pipelines():
     first = StubPipeline(AnswerResult("q", "first [S1]", "answered", SOURCES))
     second = StubPipeline(AnswerResult("q", "second", "no_results", []))
-    app_one, app_two = main.create_app(pipeline=first), main.create_app(pipeline=second)
+    app_one, app_two = api.create_app(pipeline=first), api.create_app(pipeline=second)
 
     assert TestClient(app_one).post("/query", json={"question": "q"}).json()["answer"] == "first"
     assert TestClient(app_two).post("/query", json={"question": "q"}).json()["answer"] == "second"
     assert len(first.calls) == len(second.calls) == 1
-    assert main.app.state.pipeline is None  # the default app was not touched
+    assert api.app.state.pipeline is None  # the default app was not touched
 
 
 def test_factory_passes_settings_to_the_pipeline_it_creates(monkeypatch):
-    from rag.settings import Settings
+    from rag_kit.settings import Settings
 
     created = []
 
@@ -119,9 +119,9 @@ def test_factory_passes_settings_to_the_pipeline_it_creates(monkeypatch):
             super().__init__(AnswerResult("q", "ok", "no_results", []))
             created.append(settings)
 
-    monkeypatch.setattr(main, "Pipeline", RecordingPipeline)
+    monkeypatch.setattr(api, "Pipeline", RecordingPipeline)
     settings = Settings.load(".", environ={"COLLECTION_NAME": "api_only"})
-    client = TestClient(main.create_app(settings=settings))
+    client = TestClient(api.create_app(settings=settings))
 
     client.post("/query", json={"question": "q"})
     client.post("/query", json={"question": "q"})
@@ -139,14 +139,14 @@ def test_concurrent_first_requests_create_one_pipeline(monkeypatch):
             time.sleep(0.05)  # widen the window in which a second one could be made
             created.append(self)
 
-    monkeypatch.setattr(main, "Pipeline", SlowPipeline)
-    app = main.create_app()
+    monkeypatch.setattr(api, "Pipeline", SlowPipeline)
+    app = api.create_app()
     barrier = threading.Barrier(8)
     results = []
 
     def first_request():
         barrier.wait()
-        results.append(main._pipeline_for(app))
+        results.append(api._pipeline_for(app))
 
     threads = [threading.Thread(target=first_request) for _ in range(8)]
     for thread in threads:
@@ -162,7 +162,7 @@ def test_health_reports_ready_pipeline():
     class Ready:
         ready = True
 
-    assert TestClient(main.create_app(pipeline=Ready())).get("/health").json() == {
+    assert TestClient(api.create_app(pipeline=Ready())).get("/health").json() == {
         "status": "ok", "ready": True}
 
 
@@ -176,13 +176,13 @@ def test_shutdown_closes_only_a_pipeline_the_app_created(monkeypatch):
         def close(self):
             closed.append(self)
 
-    monkeypatch.setattr(main, "Pipeline", Closable)
-    app = main.create_app()
+    monkeypatch.setattr(api, "Pipeline", Closable)
+    app = api.create_app()
     with TestClient(app) as client:  # runs the lifespan; RAG_API_WARMUP=0 in tests
         client.post("/query", json={"question": "q"})
     assert len(closed) == 1 and app.state.pipeline is None
 
     injected = Closable()
-    with TestClient(main.create_app(pipeline=injected)) as client:
+    with TestClient(api.create_app(pipeline=injected)) as client:
         client.post("/query", json={"question": "q"})
     assert closed == [closed[0]]  # the caller's pipeline is left open
