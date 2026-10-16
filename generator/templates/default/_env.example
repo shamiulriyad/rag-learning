@@ -1,0 +1,28 @@
+# Settings for {{PROJECT_NAME}}. Copy this file to .env, then fill it in:
+#   macOS/Linux:  cp .env.example .env
+#   PowerShell:   Copy-Item .env.example .env
+# Never commit .env (it is listed in .gitignore). Relative paths are resolved
+# from this folder, whatever the current directory is.
+
+# --- Gemini: writes the answers (rag-kit ask / serve){{GEMINI_EMBEDDING_NOTE}} ---
+# Get a key at https://aistudio.google.com/app/apikey and paste it after "=".
+GOOGLE_API_KEY=
+LLM_MODEL=gemini-2.5-flash
+
+# --- Embeddings ({{EMBEDDINGS_LABEL}}) ---
+# Changing the provider or model later needs a new COLLECTION_NAME or
+# `rag-kit ingest FILE --recreate`: vectors from different models do not mix.
+EMBEDDING_PROVIDER={{EMBEDDING_PROVIDER}}
+EMBEDDING_MODEL={{EMBEDDING_MODEL}}
+{{EMBEDDING_EXTRA}}
+# --- Local Qdrant store: a folder inside this project ---
+QDRANT_PATH=qdrant_data
+COLLECTION_NAME=pdf_rag
+
+# --- Optional ---
+# Default file for `rag-kit ingest` with no arguments:
+# PDF_PATH=data/sample.pdf
+# TOP_K=4
+# MIN_SCORE=
+# CHUNK_SIZE=1000
+# CHUNK_OVERLAP=150
