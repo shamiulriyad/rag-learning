@@ -8,10 +8,13 @@ Two providers, chosen by EMBEDDING_PROVIDER in .env:
   google      : Gemini embeddings (needs an API key with embedding quota)
 """
 
+import logging
 from typing import Optional
 
 from rag.errors import EmbeddingProviderError
 from rag.settings import Settings, default_settings
+
+logger = logging.getLogger(__name__)
 
 
 def get_embeddings(settings: Optional[Settings] = None):
@@ -33,7 +36,7 @@ def get_embeddings(settings: Optional[Settings] = None):
                 "Check the model name and your network (the first run downloads it "
                 "into the Hugging Face cache)."
             ) from exc
-        print(f"[5] Embedding  : {settings.embedding_model} (local)")
+        logger.info(f"[5] Embedding  : {settings.embedding_model} (local)")
         return embeddings
 
     try:
@@ -47,7 +50,7 @@ def get_embeddings(settings: Optional[Settings] = None):
         model=settings.embedding_model,
         google_api_key=settings.google_api_key,
     )
-    print(f"[5] Embedding  : {settings.embedding_model}")
+    logger.info(f"[5] Embedding  : {settings.embedding_model}")
     return embeddings
 
 
@@ -68,5 +71,5 @@ def detect_dimension(embeddings, settings: Optional[Settings] = None) -> int:
         raise EmbeddingProviderError(
             f"Embedding model {settings.embedding_model!r} failed on a test input: {exc}"
         ) from exc
-    print(f"    vector size: {dim}")
+    logger.info(f"    vector size: {dim}")
     return dim

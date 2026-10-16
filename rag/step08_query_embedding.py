@@ -5,10 +5,13 @@ LangChain's retriever would do this internally, but doing it explicitly keeps
 the pipeline visible and lets you inspect or cache the vector.
 """
 
+import logging
 from typing import List
+
+logger = logging.getLogger(__name__)
 
 
 def embed_question(embeddings, question: str) -> List[float]:
     vector = embeddings.embed_query(question)
-    print(f"[8] Query vec  : {len(vector)} dimensions")
+    logger.info(f"[8] Query vec  : {len(vector)} dimensions")
     return vector

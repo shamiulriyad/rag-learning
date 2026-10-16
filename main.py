@@ -14,6 +14,7 @@ Qdrant in local mode allows only one process at a time - run ingestion first,
 then start this with a single worker.
 """
 
+import logging
 import os
 from contextlib import asynccontextmanager
 from typing import List, Optional
@@ -22,8 +23,11 @@ from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from rag.errors import RagError
+from rag.log import show_progress
 from rag.pipeline import Pipeline
 from rag.step11_answer import strip_markers  # noqa: F401 - re-exported for callers
+
+logger = logging.getLogger("rag.api")  # under "rag" so show_progress() prints it
 
 _pipeline: Optional[Pipeline] = None
 
@@ -40,11 +44,12 @@ async def lifespan(_app: FastAPI):
     # Warm up at startup so the first real request is fast. If it fails (e.g. the
     # collection has not been ingested yet) the service still starts and /health
     # stays green; /query then returns a clear 503.
+    show_progress()
     if os.getenv("RAG_API_WARMUP", "1") == "1":
         try:
             get_pipeline().warm_up()
         except Exception as exc:  # noqa: BLE001 - reported back on /query
-            print(f"[startup] not ready yet: {exc}")
+            logger.warning(f"[startup] not ready yet: {exc}")
     yield
     if _pipeline is not None:
         _pipeline.close()

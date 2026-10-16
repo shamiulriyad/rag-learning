@@ -11,4 +11,10 @@
 9  step09_retrieve        Retrieve relevant chunks
 10 step10_generate        Gemini
 11 step11_answer          Answer + sources
+
+Steps report progress through logging (see rag/log.py), never print().
 """
+
+import logging
+
+logging.getLogger(__name__).addHandler(logging.NullHandler())

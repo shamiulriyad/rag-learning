@@ -5,6 +5,7 @@ from that context only, and to tag every claim with the [S1]..[Sn] marker of
 the chunk it came from - that is what makes step 11's sources trustworthy.
 """
 
+import logging
 from typing import List, Optional, Tuple
 
 from langchain_core.documents import Document
@@ -13,6 +14,8 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from rag.errors import GenerationError
 from rag.settings import Settings, default_settings
+
+logger = logging.getLogger(__name__)
 
 NO_RESULTS_ANSWER = "Nothing relevant was retrieved from the documents for this question."
 
@@ -77,5 +80,5 @@ def generate_answer(question: str, scored_docs: List[Tuple[Document, float]], ll
             "LLM_MODEL name and your quota (HTTP 429 means rate-limited; wait and retry)."
         ) from exc
 
-    print(f"[10] Gemini    : {settings.llm_model} answered")
+    logger.info(f"[10] Gemini    : {settings.llm_model} answered")
     return answer.strip()

@@ -6,9 +6,12 @@ Returns (Document, score) pairs, highest score first. With a `min_score`
 "nothing relevant" rather than "the k least-bad chunks".
 """
 
+import logging
 from typing import List, Optional, Tuple
 
 from langchain_core.documents import Document
+
+logger = logging.getLogger(__name__)
 
 
 def retrieve(vector_store, query_vector: List[float], k: int,
@@ -22,10 +25,10 @@ def retrieve(vector_store, query_vector: List[float], k: int,
         results = kept
 
     note = f" ({dropped} below min score {min_score})" if dropped else ""
-    print(f"[9] Retrieved  : {len(results)} chunks{note}")
+    logger.info(f"[9] Retrieved  : {len(results)} chunks{note}")
     for i, (doc, score) in enumerate(results, start=1):
         page = doc.metadata.get("page_number") or "-"
         preview = doc.page_content[:70].replace("\n", " ")
-        print(f"    S{i} page {page} | score {score:.3f} | {preview}...")
+        logger.info(f"    S{i} page {page} | score {score:.3f} | {preview}...")
 
     return results

@@ -26,6 +26,7 @@ from pathlib import Path
 
 import config
 from rag.errors import RagError
+from rag.log import show_progress
 
 ROOT = Path(__file__).resolve().parent
 
@@ -401,6 +402,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
+    show_progress()  # step progress to stdout (stderr under --json, see _quiet)
     try:
         return args.func(args)
     except RagError as exc:

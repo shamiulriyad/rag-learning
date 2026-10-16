@@ -16,6 +16,7 @@ so a document is *replaced*, never duplicated. `delete_document` removes one
 document; `--recreate` drops the whole collection.
 """
 
+import logging
 import time
 import uuid
 from pathlib import Path
@@ -29,6 +30,8 @@ from qdrant_client.http import models
 from rag.errors import EmptyDocumentError, RagError, VectorStoreError
 from rag.settings import Settings, default_settings
 from rag.step05_embedding import detect_dimension
+
+logger = logging.getLogger(__name__)
 
 # Fixed namespace so the same chunk always maps to the same point ID.
 _ID_NAMESPACE = uuid.UUID("8d2f1c3e-5b7a-4e0f-9c61-2a4b6d8e0f13")
@@ -108,7 +111,7 @@ def ensure_collection(client: QdrantClient, dimension: int, recreate: bool = Fal
     if exists and recreate:
         client.delete_collection(name)
         exists = False
-        print(f"    dropped old collection '{name}'")
+        logger.info(f"    dropped old collection '{name}'")
 
     if exists:
         check_dimension(client, name, dimension, settings)
@@ -118,7 +121,7 @@ def ensure_collection(client: QdrantClient, dimension: int, recreate: bool = Fal
         collection_name=name,
         vectors_config=models.VectorParams(size=dimension, distance=models.Distance.COSINE),
     )
-    print(f"    created collection '{name}' (dim={dimension}, cosine)")
+    logger.info(f"    created collection '{name}' (dim={dimension}, cosine)")
 
 
 def get_vector_store(embeddings, client: QdrantClient = None,
@@ -191,7 +194,7 @@ def store_chunks(chunks: List[Document], embeddings, recreate: bool = False,
                 "again is safe - chunks are keyed by file and position, so nothing is "
                 "duplicated."
             ) from exc
-        print(f"    stored {min(start + batch, len(chunks))}/{len(chunks)} chunks", end="\r")
+        logger.info(f"    stored {min(start + batch, len(chunks))}/{len(chunks)} chunks")
 
     # Replace, not append: drop older chunks of the same file that this run
     # did not overwrite (e.g. the file shrank or its content changed).
@@ -206,7 +209,7 @@ def store_chunks(chunks: List[Document], embeddings, recreate: bool = False,
 
     total = client.count(name, exact=True).count
     note = f", {replaced} outdated chunks removed" if replaced else ""
-    print(f"\n[6] Qdrant     : collection '{name}' now holds {total} vectors{note}")
+    logger.info(f"[6] Qdrant     : collection '{name}' now holds {total} vectors{note}")
     return {"collection": name, "stored": len(chunks), "removed_outdated": replaced,
             "total": total}
 

@@ -5,10 +5,13 @@ instead of halfway through the pipeline. PDF, plain text and Markdown are
 supported (see rag.settings.SUPPORTED_EXTENSIONS).
 """
 
+import logging
 from pathlib import Path
 
 from rag.errors import UnsupportedFileError
 from rag.settings import SUPPORTED_EXTENSIONS
+
+logger = logging.getLogger(__name__)
 
 
 def load_document(path) -> Path:
@@ -27,7 +30,7 @@ def load_document(path) -> Path:
         raise UnsupportedFileError(f"File is empty: {path.name}")
 
     size_kb = path.stat().st_size / 1024
-    print(f"[1] Document   : {path.name} ({size_kb:.1f} KB)")
+    logger.info(f"[1] Document   : {path.name} ({size_kb:.1f} KB)")
     return path
 
 

@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT))
 
 import config  # noqa: E402
 from rag.errors import RagError  # noqa: E402
+from rag.log import show_progress  # noqa: E402
 from rag.pipeline import Pipeline  # noqa: E402
 from rag.step05_embedding import get_embeddings  # noqa: E402
 from rag.step06_vector_store import describe_location, get_client  # noqa: E402
@@ -25,6 +26,7 @@ from rag.step06_vector_store import describe_location, get_client  # noqa: E402
 UPLOAD_DIR = ROOT / "uploads"
 
 st.set_page_config(page_title="RAG toolkit - test UI", layout="wide")
+show_progress()  # step progress in the terminal running streamlit, as before
 
 
 @st.cache_resource(show_spinner="Loading embedding model...")

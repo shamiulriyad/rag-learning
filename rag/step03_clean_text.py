@@ -5,11 +5,14 @@ headers/footers and stray page numbers. All of that pollutes the embeddings,
 so it gets removed before chunking.
 """
 
+import logging
 import re
 from collections import Counter
 from typing import List
 
 from langchain_core.documents import Document
+
+logger = logging.getLogger(__name__)
 
 _CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 _HYPHEN_BREAK = re.compile(r"(\w)-\n(\w)")
@@ -68,6 +71,6 @@ def clean_documents(docs: List[Document], min_chars: int = 50) -> List[Document]
         cleaned.append(Document(id=doc.id, page_content=body, metadata=dict(doc.metadata)))
 
     dropped = len(docs) - len(cleaned)
-    print(f"[3] Cleaned    : {len(cleaned)} pages kept, {dropped} dropped, "
-          f"{len(boilerplate)} repeating header/footer lines removed")
+    logger.info(f"[3] Cleaned    : {len(cleaned)} pages kept, {dropped} dropped, "
+                f"{len(boilerplate)} repeating header/footer lines removed")
     return cleaned

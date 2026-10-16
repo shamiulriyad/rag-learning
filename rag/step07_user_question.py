@@ -1,7 +1,10 @@
 """STEP 7 - User question."""
 
+import logging
 import sys
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 def get_question(argv: Optional[list] = None) -> str:
@@ -12,5 +15,5 @@ def get_question(argv: Optional[list] = None) -> str:
     if not question:
         raise ValueError("Empty question.")
 
-    print(f"[7] Question   : {question}")
+    logger.info(f"[7] Question   : {question}")
     return question

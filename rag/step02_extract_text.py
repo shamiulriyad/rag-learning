@@ -23,6 +23,7 @@ that is the point where OCR would be the next step.
 """
 
 import hashlib
+import logging
 from pathlib import Path
 from typing import List, Optional
 
@@ -31,6 +32,8 @@ from langchain_core.documents import Document
 from rag.errors import ExtractionError
 from rag.pdf_font_repair import is_readable, repair_page, text_quality
 from rag.settings import Settings, default_settings
+
+logger = logging.getLogger(__name__)
 
 
 def document_id(path: Path) -> str:
@@ -68,7 +71,7 @@ def _extract_plain_text(path: Path) -> List[Document]:
     except OSError as exc:
         raise ExtractionError(f"Could not read {path.name}: {exc}") from exc
 
-    print(f"[2] Extracted  : 1 text document, {len(text):,} characters")
+    logger.info(f"[2] Extracted  : 1 text document, {len(text):,} characters")
     return [Document(page_content=text, metadata=_metadata(path, document_id(path), None))]
 
 
@@ -113,22 +116,22 @@ def _extract_pdf(path: Path, font_repair: bool) -> List[Document]:
         doc.close()
 
     total_chars = sum(len(p.page_content) for p in pages)
-    print(f"[2] Extracted  : {len(pages)} pages, {total_chars:,} characters"
-          f"{' (font repair on)' if font_repair else ''}")
-    print(f"    quality    : {readable} readable, {corrupted} corrupted, {blank} blank")
+    logger.info(f"[2] Extracted  : {len(pages)} pages, {total_chars:,} characters"
+                f"{' (font repair on)' if font_repair else ''}")
+    logger.info(f"    quality    : {readable} readable, {corrupted} corrupted, {blank} blank")
 
     if corrupted:
         worst.sort()
         preview = ", ".join(f"p{pn}" for _, _, pn in worst[:10])
-        print(f"    ! {corrupted} page(s) look corrupted: {preview}")
+        logger.warning(f"    ! {corrupted} page(s) look corrupted: {preview}")
         if font_repair:
-            print("      The maps in pdf_font_repair.py are PDF-specific; OCR is the fallback.")
+            logger.warning("      The maps in pdf_font_repair.py are PDF-specific; OCR is the fallback.")
         else:
-            print("      If the text is scrambled glyphs, try PDF_FONT_REPAIR=true; "
-                  "otherwise add OCR (pytesseract / ocrmypdf).")
+            logger.warning("      If the text is scrambled glyphs, try PDF_FONT_REPAIR=true; "
+                           "otherwise add OCR (pytesseract / ocrmypdf).")
 
     if total_chars < 100:
-        print("    ! Almost no text found - this PDF is probably a scan. Add OCR "
-              "before this pipeline can work.")
+        logger.warning("    ! Almost no text found - this PDF is probably a scan. Add OCR "
+                       "before this pipeline can work.")
 
     return pages
