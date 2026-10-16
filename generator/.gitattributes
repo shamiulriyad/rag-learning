@@ -1,0 +1,3 @@
+# The generator runs on Linux and macOS too: keep LF so the bin shebang
+# (#!/usr/bin/env node) and the generated project files work there.
+* text=auto eol=lf
