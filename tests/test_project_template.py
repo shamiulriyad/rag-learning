@@ -63,7 +63,8 @@ def test_errors_are_reported_not_raised(example, capsys):
 
 def test_template_uses_only_the_public_api():
     source = EXAMPLE.read_text(encoding="utf-8")
-    imports = {line.strip() for line in source.splitlines() if line.startswith(("import ", "from "))}
+    imports = {line.strip() for line in source.splitlines()
+               if line.startswith(("import ", "from "))}
     assert imports == {
         "import sys",
         "from rag_kit import Pipeline, Settings",

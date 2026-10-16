@@ -162,7 +162,8 @@ def test_rag_project_dir_wins_over_marker_and_needs_no_marker(tmp_path):
     marked = _project(tmp_path)
     plain = tmp_path / "plain"
     plain.mkdir()
-    assert find_project_dir(start=marked, environ={"RAG_PROJECT_DIR": str(plain)}) == plain.resolve()
+    found = find_project_dir(start=marked, environ={"RAG_PROJECT_DIR": str(plain)})
+    assert found == plain.resolve()
 
 
 def test_missing_rag_project_dir_is_an_error(tmp_path):

@@ -125,7 +125,8 @@ def _extract_pdf(path: Path, font_repair: bool) -> List[Document]:
         preview = ", ".join(f"p{pn}" for _, _, pn in worst[:10])
         logger.warning(f"    ! {corrupted} page(s) look corrupted: {preview}")
         if font_repair:
-            logger.warning("      The maps in pdf_font_repair.py are PDF-specific; OCR is the fallback.")
+            logger.warning("      The maps in pdf_font_repair.py are PDF-specific; "
+                           "OCR is the fallback.")
         else:
             logger.warning("      If the text is scrambled glyphs, try PDF_FONT_REPAIR=true; "
                            "otherwise add OCR (pytesseract / ocrmypdf).")

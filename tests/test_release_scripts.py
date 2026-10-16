@@ -36,7 +36,8 @@ def test_versions_are_in_sync_in_this_checkout():
 
 
 def test_tag_must_match():
-    version = json.loads((ROOT / "generator" / "package.json").read_text(encoding="utf-8"))["version"]
+    package = (ROOT / "generator" / "package.json").read_text(encoding="utf-8")
+    version = json.loads(package)["version"]
     assert _script("check_versions.py", "--tag", f"v{version}").returncode == 0
     wrong = _script("check_versions.py", "--tag", "v99.0.0")
     assert wrong.returncode == 1 and "does not match" in wrong.stdout
@@ -55,7 +56,8 @@ def test_set_bumps_both_files_and_uses_npm_prerelease_form(tmp_path):
     package = json.loads((project / "generator" / "package.json").read_text(encoding="utf-8"))
     assert package["version"] == "0.2.0-rc.1"
     assert package["name"] == "rag-kit-dev"  # the rest of package.json is kept
-    assert _script("check_versions.py", "--root", str(project), "--tag", "v0.2.0rc1").returncode == 0
+    tagged = _script("check_versions.py", "--root", str(project), "--tag", "v0.2.0rc1")
+    assert tagged.returncode == 0
 
 
 def test_mismatch_and_missing_changelog_entry_fail(tmp_path):
@@ -92,7 +94,8 @@ def _git_repo(tmp_path, files):
         path = tmp_path / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
-    git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"]
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+           "-c", "commit.gpgsign=false"]
     subprocess.run([*git, "init", "-q"], cwd=tmp_path, check=True)
     subprocess.run([*git, "add", "-A"], cwd=tmp_path, check=True)
     subprocess.run([*git, "commit", "-q", "-m", "x"], cwd=tmp_path, check=True)

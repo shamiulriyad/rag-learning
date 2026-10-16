@@ -5,8 +5,13 @@ from langchain_core.documents import Document
 from langchain_core.embeddings import DeterministicFakeEmbedding
 
 from rag_kit.errors import EmptyDocumentError, VectorStoreError
-from rag_kit.step06_vector_store import (delete_document, get_client, list_documents,
-                                     open_vector_store, store_chunks)
+from rag_kit.step06_vector_store import (
+    delete_document,
+    get_client,
+    list_documents,
+    open_vector_store,
+    store_chunks,
+)
 
 COLLECTION = "unit_test"
 

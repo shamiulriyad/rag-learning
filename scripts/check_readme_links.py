@@ -47,7 +47,8 @@ def check_file(page: str, ref: str, root: Path, absolute_only: bool) -> list:
             expected = "tree" if kind == "tree" else "blob"
             actual = object_type(ref, path, root)
             if actual != expected:
-                problems.append(f"{page}: {link} -> {path} is {actual} at {ref}, expected {expected}")
+                problems.append(f"{page}: {link} -> {path} is {actual} at {ref}, "
+                                f"expected {expected}")
         elif link.startswith("#") or "{{" in link:
             continue  # same-page anchor, or a template placeholder
         elif absolute_only:

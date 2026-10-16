@@ -34,7 +34,8 @@ def npm_form(version: str) -> str:
     v = Version(version)
     base = ".".join(str(part) for part in v.release)
     if v.pre:
-        return f"{base}-{ {'a': 'alpha', 'b': 'beta', 'rc': 'rc'}[v.pre[0]] }.{v.pre[1]}".replace(" ", "")
+        label = {"a": "alpha", "b": "beta", "rc": "rc"}[v.pre[0]]
+        return f"{base}-{label}.{v.pre[1]}"
     if v.is_devrelease or v.is_postrelease or v.local:
         raise ValueError(f"{version}: dev, post and local versions are not released")
     return base
@@ -83,16 +84,19 @@ def set_version(root: Path, version: str) -> None:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--tag", help="release tag that must match, e.g. v0.1.0")
-    parser.add_argument("--set", metavar="VERSION", help="write VERSION to both files (PEP 440 form)")
+    parser.add_argument("--set", metavar="VERSION",
+                        help="write VERSION to both files (PEP 440 form)")
     parser.add_argument("--root", type=Path, default=ROOT, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
 
     if args.set:
         set_version(args.root, args.set)
-        print(f"set pyproject.toml to {args.set} and generator/package.json to {npm_form(args.set)}")
+        print(f"set pyproject.toml to {args.set} and generator/package.json to "
+              f"{npm_form(args.set)}")
     versions = read_versions(args.root)
     problems = check(args.root, args.tag)
-    print(", ".join(f"{k}: {v}" for k, v in versions.items()) + (f", tag: {args.tag}" if args.tag else ""))
+    summary = ", ".join(f"{k}: {v}" for k, v in versions.items())
+    print(summary + (f", tag: {args.tag}" if args.tag else ""))
     for problem in problems:
         print(f"FAIL {problem}")
     print("Versions are in sync." if not problems else f"{len(problems)} problem(s).")

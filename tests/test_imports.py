@@ -47,7 +47,8 @@ def test_missing_local_extra_names_the_extra(test_settings, monkeypatch):
     from rag_kit.step05_embedding import get_embeddings
 
     _without(monkeypatch, "langchain_huggingface")
-    with pytest.raises(EmbeddingProviderError, match=r'local extra: pip install "rag-kit\[local\]"'):
+    hint = r'local extra: pip install "rag-kit\[local\]"'
+    with pytest.raises(EmbeddingProviderError, match=hint):
         get_embeddings(test_settings.replace(embedding_provider="huggingface"))
 
 
@@ -78,5 +79,6 @@ def test_missing_gemini_extra_for_embeddings_names_the_extra(test_settings, monk
 
     _without(monkeypatch, "langchain_google_genai")
     settings = test_settings.replace(embedding_provider="google", google_api_key="not-real")
-    with pytest.raises(EmbeddingProviderError, match=r'gemini extra: pip install "rag-kit\[gemini\]"'):
+    hint = r'gemini extra: pip install "rag-kit\[gemini\]"'
+    with pytest.raises(EmbeddingProviderError, match=hint):
         get_embeddings(settings)

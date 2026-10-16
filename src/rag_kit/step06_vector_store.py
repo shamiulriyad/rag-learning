@@ -95,7 +95,8 @@ def check_dimension(client: QdrantClient, name: str, expected: int,
     if actual != expected:
         raise VectorStoreError(
             f"Collection '{name}' holds {actual}-dimensional vectors, but "
-            f"{(settings or default_settings()).embedding_model} produces {expected}. Vectors from different models "
+            f"{(settings or default_settings()).embedding_model} produces {expected}. "
+            "Vectors from different models "
             "are not comparable: set EMBEDDING_MODEL back to the model that built this "
             "collection, use another COLLECTION_NAME, or rebuild it with --recreate."
         )

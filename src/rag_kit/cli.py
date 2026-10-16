@@ -171,8 +171,12 @@ def cmd_check(args) -> int:
         print("\nSome required checks failed.")
         return 1
 
-    from rag_kit.step06_vector_store import (collection_dimension, collection_exists,
-                                             describe_location, get_client)
+    from rag_kit.step06_vector_store import (
+        collection_dimension,
+        collection_exists,
+        describe_location,
+        get_client,
+    )
     collection = args.collection or settings.collection_name
     client = None
     try:

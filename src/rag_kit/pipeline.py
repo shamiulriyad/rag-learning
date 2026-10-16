@@ -24,8 +24,13 @@ from rag_kit.step02_extract_text import extract_text
 from rag_kit.step03_clean_text import clean_documents
 from rag_kit.step04_chunking import chunk_documents
 from rag_kit.step05_embedding import get_embeddings
-from rag_kit.step06_vector_store import (delete_document, get_client, list_documents,
-                                     open_vector_store, store_chunks)
+from rag_kit.step06_vector_store import (
+    delete_document,
+    get_client,
+    list_documents,
+    open_vector_store,
+    store_chunks,
+)
 from rag_kit.step08_query_embedding import embed_question
 from rag_kit.step09_retrieve import retrieve
 from rag_kit.step10_generate import NO_RESULTS_ANSWER, generate_answer, get_llm
