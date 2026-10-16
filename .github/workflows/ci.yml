@@ -1,0 +1,366 @@
+# Continuous integration for rag-kit (Python package) and rag-kit-dev (npm generator).
+#
+# Safety: no secrets are used anywhere in this workflow; a guard step fails any
+# job that sees GOOGLE_API_KEY. Tests use fakes and never call Gemini (the
+# integration/gemini tests stay skipped). HF_HOME points into the runner's temp
+# folder with HF_HUB_OFFLINE=1 and is never cached, so no embedding model can be
+# downloaded. Actions are pinned to full commit SHAs (Dependabot updates them).
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call: # release.yml runs the whole CI, including the PyTorch jobs
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  HF_HUB_OFFLINE: "1"
+  TRANSFORMERS_OFFLINE: "1"
+  RAG_REQUIRE_SOCKET_GUARD: "1"
+  PYTHONIOENCODING: utf-8
+  PYTHONDONTWRITEBYTECODE: "1"
+  UV_PYTHON_DOWNLOADS: never
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  lint:
+    name: lint, versions, links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Guard - no API key, model cache in temp
+        run: |
+          test -z "${GOOGLE_API_KEY:-}" || { echo "GOOGLE_API_KEY must not be set in CI"; exit 1; }
+          echo "HF_HOME=$RUNNER_TEMP/hf-home" >> "$GITHUB_ENV"
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.11.18"
+          enable-cache: false
+      - name: Ruff
+        run: uvx ruff@0.17.1 check .
+      - name: Package and generator versions are in sync
+        run: uv run --no-project --with "packaging>=24" python scripts/check_versions.py
+      - name: README links resolve in this commit
+        run: python3 scripts/check_readme_links.py
+
+  python-tests:
+    name: tests (${{ matrix.os }}, Python ${{ matrix.python }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.11", "3.12"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Guard - no API key, model cache in temp
+        run: |
+          test -z "${GOOGLE_API_KEY:-}" || { echo "GOOGLE_API_KEY must not be set in CI"; exit 1; }
+          echo "HF_HOME=$RUNNER_TEMP/hf-home" >> "$GITHUB_ENV"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.11.18"
+          enable-cache: false
+      - run: uv pip install --system -e ".[dev,gemini]"
+      - run: python -m pytest -p no:cacheprovider
+
+  python-lowest:
+    name: tests at the lowest allowed dependency versions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Guard - no API key, model cache in temp
+        run: |
+          test -z "${GOOGLE_API_KEY:-}" || { echo "GOOGLE_API_KEY must not be set in CI"; exit 1; }
+          echo "HF_HOME=$RUNNER_TEMP/hf-home" >> "$GITHUB_ENV"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.11.18"
+          enable-cache: false
+      - run: uv pip install --system --resolution lowest-direct -e ".[dev,gemini]"
+      - run: python -m pytest -p no:cacheprovider
+
+  resolve:
+    name: dependency ranges resolve everywhere
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.11.18"
+          enable-cache: false
+      - name: All extras, Python 3.11/3.12, Windows/Linux/macOS, highest and lowest-direct
+        run: |
+          for resolution in highest lowest-direct; do
+            for python in 3.11 3.12; do
+              for platform in windows linux macos; do
+                echo "== $resolution $python $platform"
+                uv pip compile pyproject.toml --extra all --extra dev --python-version "$python" \
+                  --python-platform "$platform" --resolution "$resolution" -q -o /dev/null
+              done
+            done
+          done
+
+  build:
+    name: build and check distributions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.11.18"
+          enable-cache: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "20"
+      - name: Build wheel and sdist (from this clean checkout)
+        run: uv build --out-dir dist
+      - name: Check archive contents (allow-list, no user data, no .gitignore)
+        run: python scripts/check_dist.py dist
+      - name: Check metadata renders on PyPI
+        run: uvx twine@7.0.0 check --strict dist/*
+      - name: Pack the generator
+        run: |
+          mkdir -p dist-npm
+          (cd generator && npm pack --ignore-scripts --pack-destination ../dist-npm)
+          tarball=$(ls dist-npm/rag-kit-dev-*.tgz)
+          tar -tvzf "$tarball"
+          test "$(tar -tzf "$tarball" | wc -l)" -eq 20
+          # The bin script must be executable (exact bits depend on the runner's umask).
+          test "$(tar -tvzf "$tarball" package/bin/rag-kit-dev.js | cut -c1-4)" = "-rwx"
+      - name: Checksums
+        run: sha256sum dist/* dist-npm/* | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: python-dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: npm-dist
+          path: dist-npm/
+          if-no-files-found: error
+          retention-days: 14
+
+  wheel-tests:
+    name: installed wheel (${{ matrix.os }}, Python ${{ matrix.python }})
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.11", "3.12"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Guard - no API key, model cache in temp
+        run: |
+          test -z "${GOOGLE_API_KEY:-}" || { echo "GOOGLE_API_KEY must not be set in CI"; exit 1; }
+          echo "HF_HOME=$RUNNER_TEMP/hf-home" >> "$GITHUB_ENV"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.11.18"
+          enable-cache: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: python-dist
+          path: dist
+      - name: Install the wheel into clean venvs (files copied, not linked to uv's cache)
+        run: |
+          py=$([ "$RUNNER_OS" = Windows ] && echo Scripts/python.exe || echo bin/python)
+          # Absolute, native paths (Git Bash's $PWD is an MSYS path on Windows).
+          wheel=$(python -c "import pathlib, sys; print(pathlib.Path(sys.argv[1]).resolve())" dist/*.whl)
+          uv venv "$RUNNER_TEMP/full" --python "${{ matrix.python }}"
+          uv venv "$RUNNER_TEMP/core" --python "${{ matrix.python }}"
+          uv pip install --link-mode copy --python "$RUNNER_TEMP/full/$py" "${wheel}[dev,gemini]"
+          uv pip install --link-mode copy --python "$RUNNER_TEMP/core/$py" "$wheel"
+          {
+            echo "FULL_PY=$RUNNER_TEMP/full/$py"
+            echo "CORE_PY=$RUNNER_TEMP/core/$py"
+            echo "WHEEL=$wheel"
+          } >> "$GITHUB_ENV"
+      - name: Unit tests against the installed wheel (source tree not importable)
+        run: |
+          tree="$RUNNER_TEMP/test-tree"
+          mkdir -p "$tree" && cp -r tests "$tree/"
+          echo "# rag-kit project (test tree)" > "$tree/rag-kit.toml"
+          printf '[pytest]\ntestpaths = tests\naddopts = -ra -p no:cacheprovider\nmarkers =\n    integration: real model and store\n    gemini: real Gemini call\nfilterwarnings =\n    ignore::DeprecationWarning\n' > "$tree/pytest.ini"
+          cd "$tree"
+          "$FULL_PY" -c "import rag_kit; assert 'site-packages' in rag_kit.__file__, rag_kit.__file__"
+          "$FULL_PY" -m pytest
+      - name: Installed packages unchanged and exactly the built wheel
+        run: |
+          "$FULL_PY" scripts/ci/check_wheel_install.py --wheel "$WHEEL"
+          "$CORE_PY" scripts/ci/check_wheel_install.py --wheel "$WHEEL"
+      - name: A core install pulls in no optional provider
+        run: |
+          "$CORE_PY" -c "
+          import importlib.util as u, rag_kit.pipeline
+          present = [m for m in ('torch', 'sentence_transformers', 'langchain_google_genai', 'fastapi', 'streamlit') if u.find_spec(m)]
+          assert not present, present"
+
+  node-tests:
+    name: generator (${{ matrix.os }}, Node ${{ matrix.node }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: ["20", "22", "24"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Unit tests, npm pack allow-list, version sync
+        working-directory: generator
+        run: npm test
+
+  e2e-generator:
+    name: generator end to end (${{ matrix.os }}, Python ${{ matrix.python }})
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.11", "3.12"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Guard - no API key, model cache in temp
+        run: |
+          test -z "${GOOGLE_API_KEY:-}" || { echo "GOOGLE_API_KEY must not be set in CI"; exit 1; }
+          echo "HF_HOME=$RUNNER_TEMP/hf-home" >> "$GITHUB_ENV"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.11.18"
+          enable-cache: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "20"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: python-dist
+          path: dist
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: npm-dist
+          path: dist-npm
+      - name: gemini (uv and pip), --no-install, failing install, refusals
+        run: |
+          python scripts/ci/e2e_generator.py --generator "$(ls dist-npm/*.tgz)" \
+            --wheel "$(ls dist/*.whl)" --work "$RUNNER_TEMP/e2e" \
+            --python "$(python -c 'import sys; print(sys.executable)')"
+
+  changes:
+    name: does this change need the PyTorch end-to-end jobs?
+    runs-on: ubuntu-latest
+    outputs:
+      local: ${{ steps.decide.outputs.local }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          # Push to main, manual runs and releases always run them; pull requests only
+          # when the generator, dependencies or install tooling change.
+          if [ "$EVENT" != "pull_request" ]; then echo "local=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if git diff --name-only "origin/$BASE_REF...HEAD" \
+              | grep -qE '^(generator/|pyproject\.toml$|scripts/ci/|\.github/workflows/ci\.yml$|src/rag_kit/step05_embedding\.py$)'; then
+            echo "local=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "local=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  e2e-local:
+    name: local embeddings end to end (${{ matrix.os }})
+    needs: [build, changes]
+    if: needs.changes.outputs.local == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Guard - no API key, model cache in temp
+        run: |
+          test -z "${GOOGLE_API_KEY:-}" || { echo "GOOGLE_API_KEY must not be set in CI"; exit 1; }
+          echo "HF_HOME=$RUNNER_TEMP/hf-home" >> "$GITHUB_ENV"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.11.18"
+          enable-cache: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "20"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: python-dist
+          path: dist
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: npm-dist
+          path: dist-npm
+      - name: Local embeddings - PyTorch installed, CPU-only on Linux, no model download
+        run: |
+          python scripts/ci/e2e_generator.py --generator "$(ls dist-npm/*.tgz)" \
+            --wheel "$(ls dist/*.whl)" --work "$RUNNER_TEMP/e2e" --cases local \
+            --python "$(python -c 'import sys; print(sys.executable)')"
