@@ -178,7 +178,7 @@ def test_requirement_groups_reads_extras_and_skips_self_references():
     requirements = [
         "langchain-core<2,>=1.6.9",
         'fastapi<1,>=0.143; extra == "api"',
-        'rag-kit[api]; extra == "dev"',
+        'ragkit-dev[api]; extra == "dev"',
         'pytest<10,>=9.1; extra == "dev"',
         'tomli>=2; python_version < "3.0"',
         'typing-extensions>=4; python_version >= "3.8"',
@@ -191,7 +191,7 @@ def test_requirement_groups_reads_extras_and_skips_self_references():
 
 
 def test_dependency_report_covers_every_declared_requirement():
-    declared = cli.requirement_groups(importlib.metadata.requires("rag-kit"))
+    declared = cli.requirement_groups(importlib.metadata.requires("ragkit-dev"))
     _ok, rows = cli.dependency_report()
     names = {name for _status, name, _detail in rows}
 
@@ -203,7 +203,7 @@ def test_dependency_report_covers_every_declared_requirement():
 def test_missing_core_dependency_fails():
     ok, rows = cli.dependency_report(["pytest", "no-such-package-xyz>=1"])
     assert not ok
-    assert ("FAIL", "no-such-package-xyz", "not installed (core): pip install rag-kit") in rows
+    assert ("FAIL", "no-such-package-xyz", "not installed (core): pip install ragkit-dev") in rows
     assert rows[0][0] == "ok" and rows[0][1] == "pytest"
 
 
@@ -211,7 +211,7 @@ def test_missing_optional_dependency_only_warns():
     ok, rows = cli.dependency_report(["pytest", 'no-such-package-xyz; extra == "api"'])
     assert ok
     assert ("--", "no-such-package-xyz",
-            'not installed (optional: serve): pip install "rag-kit[api]"') in rows
+            'not installed (optional: serve): pip install "ragkit-dev[api]"') in rows
 
 
 # --- serve / ui honour --collection for the child process only ------------------

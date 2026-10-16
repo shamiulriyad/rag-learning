@@ -35,7 +35,7 @@ import zipfile
 from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
 
-DISTRIBUTION = "rag-kit"
+DISTRIBUTION = "ragkit-dev"
 PACKAGE = "rag_kit"
 
 

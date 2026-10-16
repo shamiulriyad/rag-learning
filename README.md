@@ -12,8 +12,9 @@ test UI.
 
 ![Pipeline: ingest (load, extract, clean, chunk, embed, store in Qdrant) and query (question, embed, retrieve, Gemini, answer with sources); CLI, FastAPI and Streamlit all call the same Pipeline](https://raw.githubusercontent.com/shamiulriyad/rag-learning/main/docs/architecture.svg)
 
-> **Status:** 0.1.0, not yet published to PyPI. Install from a checkout (see
-> below). Upgrading from the script-based version? See
+> **Status:** 0.1.0, not yet published to PyPI. It will be published as
+> `ragkit-dev`; the import name stays `rag_kit` and the command stays `rag-kit`.
+> Install from a checkout (see below). Upgrading from the script-based version? See
 > [CHANGELOG.md](https://github.com/shamiulriyad/rag-learning/blob/main/CHANGELOG.md) for the old-to-new command table.
 
 ## Start a new project
@@ -24,14 +25,14 @@ with rag-kit installed. It explains the local-vs-Gemini embedding choice before
 installing anything and never creates `.env` or asks for an API key.
 
 ```bash
-npx rag-kit-dev my-rag                     # once rag-kit-dev and rag-kit are published
+npx rag-kit-dev my-rag                     # once rag-kit-dev (npm) and ragkit-dev (PyPI) are published
 ```
 
 Until then, run it from a checkout against a locally built wheel (testing only):
 
 ```bash
 uv build --out-dir dist
-node generator/bin/rag-kit-dev.js my-rag --embeddings gemini --package-spec dist/rag_kit-0.1.0-py3-none-any.whl
+node generator/bin/rag-kit-dev.js my-rag --embeddings gemini --package-spec dist/ragkit_dev-0.1.0-py3-none-any.whl
 ```
 
 ## What it does
@@ -101,7 +102,7 @@ uv pip install -e ".[local,gemini]"
 ```
 
 This works on x86_64 and aarch64 Linux with Python 3.11 and 3.12. Later
-`pip install -U "rag-kit[local]"` keeps the CPU build as long as it satisfies
+`pip install -U "ragkit-dev[local]"` keeps the CPU build as long as it satisfies
 the requirement; upgrading torch itself (`pip install -U torch`) without the
 `--index-url` above would switch to the CUDA build. If a CUDA build is already
 installed, start from a fresh virtual environment: reinstalling torch over it
@@ -354,7 +355,7 @@ uniquely named collection inside a temporary Qdrant folder. Stop `serve` and
 | `… is in use by another process` | Embedded Qdrant allows one process. Stop `serve`/`ui`/other commands, or use a Qdrant server. |
 | `Collection 'x' holds N-dimensional vectors, but … produces M` | The embedding model changed. Restore `EMBEDDING_MODEL`, use another `COLLECTION_NAME`, or `--recreate`. |
 | `GOOGLE_API_KEY is not set` | Put the key in the project's `.env`. |
-| `… is not installed. Run: pip install "rag-kit[…]"` | Install the extra named in the message. |
+| `… is not installed. Run: pip install "ragkit-dev[…]"` | Install the extra named in the message. |
 | `… could not answer … 429` | Gemini rate limit or quota. Wait, or raise `EMBED_SLEEP` when using Gemini embeddings. |
 | `… page(s) look corrupted` | Scrambled text: try `--font-repair on`; scanned PDF: run OCR (e.g. `ocrmypdf`). |
 | `Unsupported file type` | Convert to PDF, `.txt` or `.md`. |

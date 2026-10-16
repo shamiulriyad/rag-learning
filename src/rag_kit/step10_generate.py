@@ -43,7 +43,7 @@ def get_llm(settings: Optional[Settings] = None) -> "ChatGoogleGenerativeAI":  #
         from langchain_google_genai import ChatGoogleGenerativeAI
     except ImportError as exc:
         raise GenerationError(
-            f'Answer generation needs the gemini extra: pip install "rag-kit[gemini]" ({exc}).'
+            f'Answer generation needs the gemini extra: pip install "ragkit-dev[gemini]" ({exc}).'
         ) from exc
     return ChatGoogleGenerativeAI(
         model=settings.llm_model,

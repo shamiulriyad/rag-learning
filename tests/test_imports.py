@@ -32,7 +32,8 @@ def test_get_llm_without_gemini_sdk_is_actionable(test_settings, monkeypatch):
 
     settings = test_settings.replace(google_api_key="test-key-not-real")
     monkeypatch.setitem(sys.modules, "langchain_google_genai", None)  # import now fails
-    with pytest.raises(GenerationError, match=r"gemini extra: pip install \"rag-kit\[gemini\]\""):
+    hint = r"gemini extra: pip install \"ragkit-dev\[gemini\]\""
+    with pytest.raises(GenerationError, match=hint):
         get_llm(settings)
 
 
@@ -47,7 +48,7 @@ def test_missing_local_extra_names_the_extra(test_settings, monkeypatch):
     from rag_kit.step05_embedding import get_embeddings
 
     _without(monkeypatch, "langchain_huggingface")
-    hint = r'local extra: pip install "rag-kit\[local\]"'
+    hint = r'local extra: pip install "ragkit-dev\[local\]"'
     with pytest.raises(EmbeddingProviderError, match=hint):
         get_embeddings(test_settings.replace(embedding_provider="huggingface"))
 
@@ -67,7 +68,7 @@ def test_missing_sentence_transformers_names_the_local_extra(test_settings, monk
     fake = types.ModuleType("langchain_huggingface")
     fake.HuggingFaceEmbeddings = HuggingFaceEmbeddings
     monkeypatch.setitem(sys.modules, "langchain_huggingface", fake)
-    with pytest.raises(EmbeddingProviderError, match=r'rag-kit\[local\].*sentence_transformers'):
+    with pytest.raises(EmbeddingProviderError, match=r'ragkit-dev\[local\].*sentence_transformers'):
         get_embeddings(test_settings.replace(embedding_provider="huggingface"))
 
 
@@ -79,6 +80,6 @@ def test_missing_gemini_extra_for_embeddings_names_the_extra(test_settings, monk
 
     _without(monkeypatch, "langchain_google_genai")
     settings = test_settings.replace(embedding_provider="google", google_api_key="not-real")
-    hint = r'gemini extra: pip install "rag-kit\[gemini\]"'
+    hint = r'gemini extra: pip install "ragkit-dev\[gemini\]"'
     with pytest.raises(EmbeddingProviderError, match=hint):
         get_embeddings(settings)

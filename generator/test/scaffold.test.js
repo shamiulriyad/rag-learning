@@ -36,7 +36,7 @@ test("local: .env.example has an empty key and the local provider", async () => 
   assert.match(env, /^COLLECTION_NAME=pdf_rag$/m);  // the runtime default, unchanged
   assert.doesNotMatch(env, /^EMBED_SLEEP=/m);
   assert.equal(await read("requirements.txt"),
-    "# This project's Python dependencies (installed into .venv by rag-kit-dev).\nrag-kit[local,gemini]==0.1.0\n");
+    "# This project's Python dependencies (installed into .venv by rag-kit-dev).\nragkit-dev[local,gemini]==0.1.0\n");
 });
 
 test("gemini: provider, model and batch pause", async () => {
@@ -46,7 +46,7 @@ test("gemini: provider, model and batch pause", async () => {
   assert.match(env, /^EMBEDDING_PROVIDER=google$/m);
   assert.match(env, /^EMBEDDING_MODEL=models\/gemini-embedding-001$/m);
   assert.match(env, /^EMBED_SLEEP=60$/m);
-  assert.match(await read("requirements.txt"), /^rag-kit\[gemini\]==0\.1\.0$/m);
+  assert.match(await read("requirements.txt"), /^ragkit-dev\[gemini\]==0\.1\.0$/m);
   assert.doesNotMatch(await read("README.md"), /torch/);
 });
 

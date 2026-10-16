@@ -1,7 +1,7 @@
 """End-to-end test of the rag-kit-dev generator.
 
     python scripts/ci/e2e_generator.py --generator rag-kit-dev-0.1.0.tgz \
-        --wheel rag_kit-0.1.0-py3-none-any.whl --work <empty dir> \
+        --wheel ragkit_dev-0.1.0-py3-none-any.whl --work <empty dir> \
         [--source wheel|testpypi|pypi] [--python PATH] \
         [--cases gemini-uv,gemini-pip,no-install,failure,refusals,local]
 
@@ -81,7 +81,7 @@ class Runner:
         self.python = args.python
         generator = Path(args.generator)
         self.generator = str(generator.resolve()) if generator.exists() else args.generator
-        # rag_kit-0.1.0rc1-py3-none-any.whl -> 0.1.0rc1
+        # ragkit_dev-0.1.0rc1-py3-none-any.whl -> 0.1.0rc1
         self.version = self.wheel.name.split("-")[1]
         self.hf_home = self.work / "hf-home"
         self.npx = shutil.which("npx")
@@ -146,7 +146,7 @@ class Runner:
             for line in (project / "requirements.txt").read_text().splitlines()
             if line and not line.startswith("#")
         ]
-        match = re.fullmatch(r"rag-kit\[([a-z,]+)\]==(.+)", pins[0]) if len(pins) == 1 else None
+        match = re.fullmatch(r"ragkit-dev\[([a-z,]+)\]==(.+)", pins[0]) if len(pins) == 1 else None
         expect(
             match is not None
             and match.group(1) == extras
@@ -227,7 +227,7 @@ class Runner:
         )
 
     def failure(self):
-        missing = self.work / "missing-rag_kit-0.0.0-py3-none-any.whl"
+        missing = self.work / "missing-ragkit_dev-0.0.0-py3-none-any.whl"
         code, out = self.generate(
             "my-rag-fail", "--embeddings", "gemini", "--package-spec", str(missing)
         )

@@ -1,6 +1,6 @@
 """Optional HTTP API over the pipeline (steps 7-11).
 
-    pip install "rag-kit[api]"
+    pip install "ragkit-dev[api]"
     rag-kit serve                          # or: uvicorn rag_kit.api:app --port 8000
 
     GET  /health                     -> {"status": "ok", "ready": bool}

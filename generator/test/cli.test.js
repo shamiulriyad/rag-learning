@@ -72,6 +72,16 @@ test("non-interactive without --embeddings explains the choice and creates nothi
   assert.equal(await exists(path.join(work, "needs-choice")), false);
 });
 
+test("a legacy rag-kit --package-spec exits 2, names ragkit-dev and creates nothing", async () => {
+  const { run, calls } = fakeRun();
+  const result = await generate(["legacy-spec", "--embeddings", "gemini", "--package-spec", "rag-kit==0.1.0rc1"],
+    { run });
+  assert.equal(result.code, 2);
+  assert.match(result.err, /use "ragkit-dev==0\.1\.0rc1"/);
+  assert.deepEqual(calls, []);
+  assert.equal(await exists(path.join(work, "legacy-spec")), false);
+});
+
 test("a non-empty target folder is left untouched", async () => {
   const target = path.join(work, "occupied");
   await mkdir(target);
@@ -162,7 +172,7 @@ test("--package-spec installs the given wheel and notes the pin", async () => {
   const result = await generate(["from-wheel", "--embeddings", "gemini", "--package-spec", "C:\\dist\\rag_kit.whl"], { run });
   assert.equal(result.code, 0, result.err);
   assert.ok(calls.some((c) => c.args.join(" ").endsWith("C:\\dist\\rag_kit.whl[gemini]")));
-  assert.match(result.out, /requirements\.txt pins rag-kit\[gemini\]==0\.1\.0/);
+  assert.match(result.out, /requirements\.txt pins ragkit-dev\[gemini\]==0\.1\.0/);
 });
 
 test("environment values, such as API keys, are never printed", async () => {

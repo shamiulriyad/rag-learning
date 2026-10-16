@@ -2,6 +2,8 @@
 
 import { parseArgs } from "node:util";
 
+import { legacyPackageSpecError } from "./install.js";
+
 export const EMBEDDING_CHOICES = ["local", "gemini"];
 
 export const USAGE = `Usage: npx rag-kit-dev <project-name> [options]
@@ -21,9 +23,9 @@ Options:
   -h, --help                 show this help
   -v, --version              show the generator version
 
-Testing only (before rag-kit is published, or for release candidates):
+Testing only (before ragkit-dev is published, or for release candidates):
   --package-spec SPEC        install rag-kit from SPEC instead of PyPI, e.g. a
-                             local wheel path or "rag-kit==0.1.0rc1"
+                             local wheel path or "ragkit-dev==0.1.0rc1"
   --test-pypi                install from TestPyPI (dependencies from PyPI)
 `;
 
@@ -79,6 +81,10 @@ export function parseCliArgs(argv) {
     if (options[key] !== undefined && options[key].trim() === "") {
       throw new UsageError(`--${key === "python" ? "python" : "package-spec"} needs a value.`);
     }
+  }
+  const legacy = options.packageSpec === undefined ? null : legacyPackageSpecError(options.packageSpec);
+  if (legacy) {
+    throw new UsageError(legacy);
   }
   return options;
 }

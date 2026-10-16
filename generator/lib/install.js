@@ -14,16 +14,34 @@ export function extrasFor(embeddings) {
 
 // The dependency written to requirements.txt: always the published release.
 export function pinnedRequirement(embeddings, version) {
-  return `rag-kit[${extrasFor(embeddings).join(",")}]==${version}`;
+  return `ragkit-dev[${extrasFor(embeddings).join(",")}]==${version}`;
+}
+
+// A requirement (not a file name such as rag_kit-0.1.0-py3-none-any.whl) that names
+// the old distribution name rag-kit, which is never published.
+const LEGACY_REQUIREMENT = /^\s*rag[-_.]+kit\s*(\[[^\]]*\])?\s*($|[=<>!~;@])/i;
+
+// The message for a --package-spec that names rag-kit, or null.
+export function legacyPackageSpecError(spec) {
+  if (!LEGACY_REQUIREMENT.test(spec)) {
+    return null;
+  }
+  const suggestion = spec.trim().replace(/^rag[-_.]+kit/i, "ragkit-dev");
+  return `--package-spec "${spec.trim()}": the Python distribution is ragkit-dev, not rag-kit; ` +
+    `use "${suggestion}".`;
 }
 
 // What to install for --package-spec: a requirement string gets the extras
 // added after its name; anything else (a wheel, an sdist, a folder) gets them appended.
 export function packageSpecWithExtras(spec, embeddings) {
+  const legacy = legacyPackageSpecError(spec);
+  if (legacy) {
+    throw new Error(legacy);
+  }
   const extras = `[${extrasFor(embeddings).join(",")}]`;
-  const named = spec.match(/^\s*rag[-_]kit\s*(\[[^\]]*\])?\s*(.*)$/i);
+  const named = spec.match(/^\s*ragkit[-_.]+dev\s*(\[[^\]]*\])?\s*(.*)$/i);
   if (named) {
-    return `rag-kit${extras}${named[2] ? named[2].trim() : ""}`;
+    return `ragkit-dev${extras}${named[2] ? named[2].trim() : ""}`;
   }
   return `${spec}${extras}`;
 }
@@ -52,7 +70,7 @@ export function installPlan({ platform, pythonExecutable, useUv, embeddings, gpu
     // rag-kit itself from TestPyPI without dependencies, then everything else from
     // PyPI: TestPyPI must never supply third-party packages.
     const spec = packageSpec ? packageSpecWithExtras(packageSpec, embeddings).replace(/\[[^\]]*\]/, "")
-      : `rag-kit==${version}`;
+      : `ragkit-dev==${version}`;
     steps.push({ label: "Install rag-kit from TestPyPI (no dependencies)",
       ...pipInstall(["--no-deps", "--index-url", TEST_PYPI_INDEX, spec]) });
     steps.push({ label: "Install rag-kit's dependencies from PyPI",

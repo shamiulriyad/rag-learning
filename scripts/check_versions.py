@@ -4,7 +4,7 @@
     python scripts/check_versions.py --tag v0.1.0    # ... and the release tag
     python scripts/check_versions.py --set 0.1.1     # bump pyproject and package.json together
 
-The generator installs rag-kit==<its own version>, so the two must always
+The generator installs ragkit-dev==<its own version>, so the two must always
 match. They are compared as PEP 440 versions: npm writes a release candidate
 as 0.1.0-rc.1, Python as 0.1.0rc1, and pip treats both the same.
 """

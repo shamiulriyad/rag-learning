@@ -3,7 +3,7 @@ requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
-name = "rag-kit"
+name = "ragkit-dev"
 version = "0.1.0"
 description = "A reusable, developer-focused RAG toolkit for document ingestion, retrieval, and source-grounded answers."
 readme = "README.md"
@@ -54,7 +54,7 @@ ui = [
     "streamlit>=1.65,<2",
 ]
 dev = [
-    "rag-kit[api]",
+    "ragkit-dev[api]",
     "pytest>=9.1,<10",
     "pytest-socket>=0.8.1,<1",
     "pyyaml>=6.0.2,<7",
@@ -62,7 +62,7 @@ dev = [
     "ruff>=0.17,<1",
 ]
 all = [
-    "rag-kit[local,gemini,api,ui]",
+    "ragkit-dev[local,gemini,api,ui]",
 ]
 
 [project.scripts]

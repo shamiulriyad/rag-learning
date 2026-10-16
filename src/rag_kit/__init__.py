@@ -28,7 +28,7 @@ from rag_kit.settings import Settings
 logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 try:
-    __version__ = version("rag-kit")
+    __version__ = version("ragkit-dev")
 except PackageNotFoundError:  # running from a source tree that is not installed
     __version__ = "0+unknown"
 

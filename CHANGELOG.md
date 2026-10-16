@@ -3,7 +3,9 @@
 ## 0.1.0 (unreleased)
 
 First packaged release: the toolkit is now the installable Python package
-`rag-kit` (import name `rag_kit`) with a `rag-kit` command.
+`ragkit-dev` on PyPI (import name `rag_kit`) with a `rag-kit` command. The
+distribution is not called `rag-kit`: PyPI's name-similarity check would reject
+`rag-kit` as too close to the existing, unrelated `ragkit` project.
 
 ### Migrating from the script-based checkout
 
@@ -46,7 +48,7 @@ plus `api`, `ui` or `dev` as needed; see the README).
 - **`rag-kit serve` / `ui`** always pass the project to the server process in
   `RAG_PROJECT_DIR`; `--collection` still applies to that process only.
 - **`rag-kit check`** reads dependencies from the installed package's extras
-  and names the extra to install (`pip install "rag-kit[api]"`). It also
+  and names the extra to install (`pip install "ragkit-dev[api]"`). It also
   prints the project folder and the names of exported variables, and explains
   how to create `.env` from `.env.example` when it is missing.
 - **UI uploads** go to the project's `uploads/` folder.
