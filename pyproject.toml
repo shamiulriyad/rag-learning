@@ -57,6 +57,7 @@ dev = [
     "rag-kit[api]",
     "pytest>=9.1,<10",
     "pytest-socket>=0.8.1,<1",
+    "pyyaml>=6.0.2,<7",
     "httpx>=0.28,<1",
     "ruff>=0.17,<1",
 ]
