@@ -12,9 +12,9 @@ test UI.
 
 ![Pipeline: ingest (load, extract, clean, chunk, embed, store in Qdrant) and query (question, embed, retrieve, Gemini, answer with sources); CLI, FastAPI and Streamlit all call the same Pipeline](https://raw.githubusercontent.com/shamiulriyad/rag-learning/main/docs/architecture.svg)
 
-> **Status:** 0.1.0, not yet published to PyPI. It will be published as
-> `ragkit-dev`; the import name stays `rag_kit` and the command stays `rag-kit`.
-> Install from a checkout (see below). Upgrading from the script-based version? See
+> **Names:** the Python package is `ragkit-dev` (you `import rag_kit` and run
+> `rag-kit`); the project generator is the npm package `rag-kit-dev`. Version
+> 0.1.0. Upgrading from the script-based version? See
 > [CHANGELOG.md](https://github.com/shamiulriyad/rag-learning/blob/main/CHANGELOG.md) for the old-to-new command table.
 
 ## Start a new project
@@ -25,10 +25,12 @@ with rag-kit installed. It explains the local-vs-Gemini embedding choice before
 installing anything and never creates `.env` or asks for an API key.
 
 ```bash
-npx rag-kit-dev my-rag                     # once rag-kit-dev (npm) and ragkit-dev (PyPI) are published
+npx rag-kit-dev my-rag
 ```
 
-Until then, run it from a checkout against a locally built wheel (testing only):
+To try an unreleased build instead (testing only), build the wheel in a
+checkout and point the generator at it. The `--package-spec` path is relative
+to the folder you run the command in:
 
 ```bash
 uv build --out-dir dist
@@ -70,9 +72,22 @@ notes.
 py -3.11 -m venv .venv            # macOS/Linux: python3.11 -m venv .venv
 .venv\Scripts\activate            # macOS/Linux: source .venv/bin/activate
 python -m pip install -U pip
+pip install "ragkit-dev[local,gemini]"   # local embeddings + Gemini answers
+```
 
-# From a checkout of this repository:
-pip install -e ".[local,gemini]"  # local embeddings + Gemini answers
+The package is named `ragkit-dev`; `pip install ragkit` installs a different,
+unrelated project. `pip install ragkit-dev` alone gives the core (enough for
+`rag-kit check`); add extras in brackets, e.g. `pip install "ragkit-dev[gemini,api]"`.
+
+**From a checkout (development):** to work on the code or test unreleased
+changes, install the repository in editable mode instead. Wherever this README
+says `pip install "ragkit-dev[...]"`, use `pip install -e ".[...]"` from the
+checkout:
+
+```bash
+git clone https://github.com/shamiulriyad/rag-learning.git
+cd rag-learning
+pip install -e ".[local,gemini]"
 ```
 
 Choose extras for what you need:
@@ -94,12 +109,15 @@ environment, then rag-kit:
 
 ```bash
 pip install torch --index-url https://download.pytorch.org/whl/cpu
-pip install -e ".[local,gemini]"           # keeps the CPU torch that is installed
+pip install "ragkit-dev[local,gemini]"     # keeps the CPU torch that is installed
 
 # with uv instead of pip:
 uv pip install torch --index-url https://download.pytorch.org/whl/cpu
-uv pip install -e ".[local,gemini]"
+uv pip install "ragkit-dev[local,gemini]"
 ```
+
+From a checkout, the second command is `pip install -e ".[local,gemini]"`
+(`uv pip install -e ".[local,gemini]"`).
 
 This works on x86_64 and aarch64 Linux with Python 3.11 and 3.12. Later
 `pip install -U "ragkit-dev[local]"` keeps the CPU build as long as it satisfies
@@ -248,7 +266,7 @@ progress goes to stderr and stdout holds only the JSON.
 ## Optional FastAPI service
 
 ```bash
-pip install -e ".[api]"
+pip install "ragkit-dev[api]"         # from a checkout: pip install -e ".[api]"
 rag-kit serve --port 8000            # or: uvicorn rag_kit.api:app --port 8000
 rag-kit serve --collection experiments
 ```
@@ -274,7 +292,7 @@ expose it publicly. To embed it elsewhere, build your own instance with
 ## Optional Streamlit test UI
 
 ```bash
-pip install -e ".[ui]"
+pip install "ragkit-dev[ui]"          # from a checkout: pip install -e ".[ui]"
 rag-kit ui                           # http://localhost:8501
 ```
 
@@ -325,6 +343,8 @@ is not part of any package). It is off by default; enable it with
 PDF; for other broken PDFs, use OCR instead.
 
 ## Tests
+
+The tests live in the repository, so run them from a checkout:
 
 ```bash
 pip install -e ".[dev,gemini]"

@@ -5,7 +5,7 @@
 import path from "node:path";
 
 import { parseCliArgs, USAGE, UsageError } from "./args.js";
-import { installEnv, installPlan, runSteps } from "./install.js";
+import { installEnv, installPlan, resolvePackageSpec, runSteps } from "./install.js";
 import { formatCommand, run as realRun } from "./process.js";
 import { CancelledError, chooseEmbeddings, disclosure } from "./prompt.js";
 import { findPython, PythonNotFoundError } from "./python.js";
@@ -100,9 +100,10 @@ export async function main(argv, deps = {}) {
   }
 
   // 5. Install into the project's .venv.
+  const packageSpec = options.packageSpec && resolvePackageSpec(options.packageSpec, cwd, platform);
   const steps = installPlan({
     platform, pythonExecutable: python.executable, useUv, embeddings, gpu: options.gpu,
-    packageSpec: options.packageSpec, testPypi: options.testPypi, version: RAG_KIT_VERSION,
+    packageSpec, testPypi: options.testPypi, version: RAG_KIT_VERSION,
   });
   const result = await runSteps(steps, { cwd: target, env: installEnv(env), run, log: say });
   if (!result.ok) {

@@ -175,6 +175,17 @@ test("--package-spec installs the given wheel and notes the pin", async () => {
   assert.match(result.out, /requirements\.txt pins ragkit-dev\[gemini\]==0\.1\.0/);
 });
 
+test("a relative --package-spec path is taken from the folder the command runs in", async () => {
+  const platform = process.platform === "win32" ? "win32" : "linux";
+  const { run, calls } = fakeRun();
+  const result = await generate(["relative-wheel", "--embeddings", "gemini", "--package-spec",
+    "dist/ragkit_dev-0.1.0-py3-none-any.whl"], { run, platform });
+  assert.equal(result.code, 0, result.err);
+  const install = calls.find((c) => c.args.at(-1).endsWith("[gemini]"));
+  assert.equal(install.args.at(-1), `${path.resolve(work, "dist", "ragkit_dev-0.1.0-py3-none-any.whl")}[gemini]`);
+  assert.equal(install.cwd, path.join(work, "relative-wheel"));
+});
+
 test("environment values, such as API keys, are never printed", async () => {
   for (const argv of [["quiet-1", "--embeddings", "local"], ["quiet-2", "--embeddings", "gemini", "--no-install"]]) {
     const result = await generate(argv);
