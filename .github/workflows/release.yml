@@ -1,0 +1,292 @@
+# Release rag-kit (PyPI) and rag-kit-dev (npm). Run it by hand, from a tag:
+#   Actions > Release > Run workflow > "Use workflow from": the tag vX.Y.Z
+#
+#   stage = rehearsal  ->  TestPyPI only (use a pre-release such as 0.1.0rc1)
+#   stage = release    ->  TestPyPI, then PyPI, then npm (final versions only)
+#
+# Every publish job uses a GitHub Environment (testpypi, pypi, npm) that must be
+# configured with a required reviewer, so nothing is published without approval.
+# Publishing uses trusted publishing (OIDC): no API tokens are stored anywhere.
+# The exact artifacts built and tested by CI in this run are the ones published,
+# and after each publish the installed package is checked against them.
+# See RELEASING.md.
+
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: "rehearsal = TestPyPI only; release = TestPyPI, PyPI, then npm"
+        type: choice
+        options: [rehearsal, release]
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  HF_HUB_OFFLINE: "1"
+  TRANSFORMERS_OFFLINE: "1"
+  PYTHONIOENCODING: utf-8
+  UV_PYTHON_DOWNLOADS: never
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  verify:
+    name: tag, versions and links
+    runs-on: ubuntu-latest
+    steps:
+      - name: Must run from a release tag
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        run: |
+          echo "Start this workflow from a tag (Use workflow from: vX.Y.Z), not a branch."
+          exit 1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.11.18"
+          enable-cache: false
+      - name: The tag is on main, versions match it, links resolve at it
+        env:
+          TAG: ${{ github.ref_name }}
+          STAGE: ${{ inputs.stage }}
+        run: |
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main \
+            || { echo "$TAG is not on main; merge first, then tag main."; exit 1; }
+          uv run --no-project --with "packaging>=24" python scripts/check_versions.py --tag "$TAG"
+          python3 scripts/check_readme_links.py --ref "$GITHUB_SHA"
+          if [ "$STAGE" = release ]; then
+            uv run --no-project --with "packaging>=24" python -c \
+              "import sys; from packaging.version import Version; sys.exit(Version(sys.argv[1]).is_prerelease)" \
+              "${TAG#v}" || { echo "stage=release needs a final version; rehearse pre-releases."; exit 1; }
+          fi
+
+  ci:
+    name: full CI on the tag
+    needs: verify
+    uses: ./.github/workflows/ci.yml
+
+  publish-testpypi:
+    name: publish to TestPyPI
+    needs: ci
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/project/rag-kit/
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: python-dist
+          path: dist
+      - run: sha256sum dist/* | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          print-hash: true
+
+  e2e-testpypi:
+    name: generator with rag-kit from TestPyPI (${{ matrix.os }})
+    needs: publish-testpypi
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Guard - no API key, model cache in temp
+        run: |
+          test -z "${GOOGLE_API_KEY:-}" || { echo "GOOGLE_API_KEY must not be set"; exit 1; }
+          echo "HF_HOME=$RUNNER_TEMP/hf-home" >> "$GITHUB_ENV"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.11.18"
+          enable-cache: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "20"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: python-dist
+          path: dist
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: npm-dist
+          path: dist-npm
+      - name: Wait until TestPyPI serves this version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          for _ in $(seq 1 30); do
+            curl -fsS https://test.pypi.org/simple/rag-kit/ | grep -q "rag_kit-${TAG#v}-py3-none-any.whl" && exit 0
+            sleep 20
+          done
+          echo "TestPyPI does not list rag_kit-${TAG#v} after 10 minutes"; exit 1
+      - name: rag-kit only from TestPyPI (dependencies from PyPI); installed files must be this build
+        run: |
+          python scripts/ci/e2e_generator.py --generator "$(ls dist-npm/*.tgz)" \
+            --wheel "$(ls dist/*.whl)" --source testpypi --cases gemini-uv,gemini-pip \
+            --work "$RUNNER_TEMP/e2e" --python "$(python -c 'import sys; print(sys.executable)')"
+
+  publish-pypi:
+    name: publish to PyPI
+    needs: e2e-testpypi
+    if: inputs.stage == 'release'
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/rag-kit/
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: python-dist
+          path: dist
+      - run: sha256sum dist/* | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          print-hash: true
+
+  smoke-pypi:
+    name: generator with rag-kit from PyPI (${{ matrix.os }})
+    needs: publish-pypi
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Guard - no API key, model cache in temp
+        run: |
+          test -z "${GOOGLE_API_KEY:-}" || { echo "GOOGLE_API_KEY must not be set"; exit 1; }
+          echo "HF_HOME=$RUNNER_TEMP/hf-home" >> "$GITHUB_ENV"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.11.18"
+          enable-cache: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "20"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: python-dist
+          path: dist
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: npm-dist
+          path: dist-npm
+      - name: Wait until PyPI serves this version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          for _ in $(seq 1 30); do
+            curl -fsS https://pypi.org/simple/rag-kit/ | grep -q "rag_kit-${TAG#v}-py3-none-any.whl" && exit 0
+            sleep 20
+          done
+          echo "PyPI does not list rag_kit-${TAG#v} after 10 minutes"; exit 1
+      - name: requirements.txt resolved from PyPI; installed files must be this build
+        run: |
+          python scripts/ci/e2e_generator.py --generator "$(ls dist-npm/*.tgz)" \
+            --wheel "$(ls dist/*.whl)" --source pypi --cases gemini-uv,gemini-pip \
+            --work "$RUNNER_TEMP/e2e" --python "$(python -c 'import sys; print(sys.executable)')"
+
+  publish-npm:
+    name: publish rag-kit-dev to npm
+    needs: smoke-pypi
+    runs-on: ubuntu-latest
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/rag-kit-dev
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: npm-dist
+          path: dist-npm
+      - name: Trusted publishing needs npm 11.5.1 or newer
+        run: |
+          npm --version
+          node -e "const [a,b,c]=process.argv[1].split('.').map(Number); process.exit(a>11||(a===11&&(b>5||(b===5&&c>=1)))?0:1)" "$(npm --version)"
+      - run: sha256sum dist-npm/* | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Publish the tarball CI built and tested (with provenance)
+        run: npm publish --provenance --access public "$(ls dist-npm/rag-kit-dev-*.tgz)"
+
+  smoke-npm:
+    name: npx rag-kit-dev from npm (${{ matrix.os }})
+    needs: publish-npm
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Guard - no API key, model cache in temp
+        run: |
+          test -z "${GOOGLE_API_KEY:-}" || { echo "GOOGLE_API_KEY must not be set"; exit 1; }
+          echo "HF_HOME=$RUNNER_TEMP/hf-home" >> "$GITHUB_ENV"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.11.18"
+          enable-cache: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "20"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: python-dist
+          path: dist
+      - name: Wait until npm serves this version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          for _ in $(seq 1 30); do
+            [ "$(npm view "rag-kit-dev@${TAG#v}" version 2>/dev/null)" = "${TAG#v}" ] && exit 0
+            sleep 20
+          done
+          echo "npm does not serve rag-kit-dev@${TAG#v} after 10 minutes"; exit 1
+      - name: npx rag-kit-dev@version, rag-kit from PyPI; installed files must be this build
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          python scripts/ci/e2e_generator.py --generator "rag-kit-dev@${TAG#v}" \
+            --wheel "$(ls dist/*.whl)" --source pypi --cases gemini-uv,no-install,refusals \
+            --work "$RUNNER_TEMP/e2e" --python "$(python -c 'import sys; print(sys.executable)')"
