@@ -5,14 +5,14 @@ from that context only, and to tag every claim with the [S1]..[Sn] marker of
 the chunk it came from - that is what makes step 11's sources trustworthy.
 """
 
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
-import config
 from rag.errors import GenerationError
+from rag.settings import Settings, default_settings
 
 NO_RESULTS_ANSWER = "Nothing relevant was retrieved from the documents for this question."
 
@@ -32,8 +32,9 @@ PROMPT = ChatPromptTemplate.from_messages([
 ])
 
 
-def get_llm() -> "ChatGoogleGenerativeAI":  # noqa: F821 - imported on first use
-    config.require_api_key()
+def get_llm(settings: Optional[Settings] = None) -> "ChatGoogleGenerativeAI":  # noqa: F821
+    settings = settings or default_settings()
+    settings.require_api_key()
     # Imported here so ingestion and retrieval work without the Gemini SDK.
     try:
         from langchain_google_genai import ChatGoogleGenerativeAI
@@ -42,9 +43,9 @@ def get_llm() -> "ChatGoogleGenerativeAI":  # noqa: F821 - imported on first use
             f"Answer generation needs `pip install langchain-google-genai` ({exc})."
         ) from exc
     return ChatGoogleGenerativeAI(
-        model=config.LLM_MODEL,
-        google_api_key=config.GOOGLE_API_KEY,
-        temperature=config.TEMPERATURE,
+        model=settings.llm_model,
+        google_api_key=settings.google_api_key,
+        temperature=settings.temperature,
     )
 
 
@@ -58,11 +59,13 @@ def format_context(scored_docs: List[Tuple[Document, float]]) -> str:
     return "\n\n---\n\n".join(blocks)
 
 
-def generate_answer(question: str, scored_docs: List[Tuple[Document, float]], llm=None) -> str:
+def generate_answer(question: str, scored_docs: List[Tuple[Document, float]], llm=None,
+                    settings: Optional[Settings] = None) -> str:
     if not scored_docs:
         return NO_RESULTS_ANSWER
 
-    chain = PROMPT | (llm or get_llm()) | StrOutputParser()
+    settings = settings or default_settings()
+    chain = PROMPT | (llm or get_llm(settings)) | StrOutputParser()
     try:
         answer = chain.invoke({
             "context": format_context(scored_docs),
@@ -70,9 +73,9 @@ def generate_answer(question: str, scored_docs: List[Tuple[Document, float]], ll
         })
     except Exception as exc:
         raise GenerationError(
-            f"{config.LLM_MODEL} could not answer: {exc}. Check GOOGLE_API_KEY, the "
+            f"{settings.llm_model} could not answer: {exc}. Check GOOGLE_API_KEY, the "
             "LLM_MODEL name and your quota (HTTP 429 means rate-limited; wait and retry)."
         ) from exc
 
-    print(f"[10] Gemini    : {config.LLM_MODEL} answered")
+    print(f"[10] Gemini    : {settings.llm_model} answered")
     return answer.strip()

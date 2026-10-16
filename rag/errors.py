@@ -9,6 +9,10 @@ class RagError(RuntimeError):
     """Base class for expected, user-fixable failures."""
 
 
+class ConfigError(RagError):
+    """A setting is missing or invalid. The message says how to fix it."""
+
+
 class UnsupportedFileError(RagError):
     """Step 1: the input is missing, empty, or not a supported type."""
 

@@ -28,20 +28,22 @@ from typing import List, Optional
 
 from langchain_core.documents import Document
 
-import config
 from rag.errors import ExtractionError
 from rag.pdf_font_repair import is_readable, repair_page, text_quality
+from rag.settings import Settings, default_settings
 
 
 def document_id(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()[:16]
 
 
-def extract_text(path: Path, font_repair: Optional[bool] = None) -> List[Document]:
+def extract_text(path: Path, font_repair: Optional[bool] = None,
+                 settings: Optional[Settings] = None) -> List[Document]:
     path = Path(path)
     if path.suffix.lower() == ".pdf":
-        repair = config.PDF_FONT_REPAIR if font_repair is None else font_repair
-        return _extract_pdf(path, repair)
+        if font_repair is None:
+            font_repair = (settings or default_settings()).pdf_font_repair
+        return _extract_pdf(path, font_repair)
     return _extract_plain_text(path)
 
 

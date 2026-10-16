@@ -26,8 +26,8 @@ from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 
-import config
 from rag.errors import EmptyDocumentError, RagError, VectorStoreError
+from rag.settings import Settings, default_settings
 from rag.step05_embedding import detect_dimension
 
 # Fixed namespace so the same chunk always maps to the same point ID.
@@ -35,22 +35,24 @@ _ID_NAMESPACE = uuid.UUID("8d2f1c3e-5b7a-4e0f-9c61-2a4b6d8e0f13")
 _SOURCE_KEY = "metadata.source_file"
 
 
-def describe_location() -> str:
-    if config.QDRANT_PATH:
-        return f"local Qdrant store {config.QDRANT_PATH}"
-    return f"Qdrant server {config.QDRANT_URL}"
+def describe_location(settings: Optional[Settings] = None) -> str:
+    settings = settings or default_settings()
+    if settings.qdrant_path:
+        return f"local Qdrant store {settings.qdrant_path}"
+    return f"Qdrant server {settings.qdrant_url}"
 
 
-def get_client(create: bool = True) -> QdrantClient:
+def get_client(create: bool = True, settings: Optional[Settings] = None) -> QdrantClient:
     """Open Qdrant. With create=False a missing local store is an error instead
     of being silently created empty."""
-    if config.QDRANT_PATH:
-        path = Path(config.QDRANT_PATH)
+    settings = settings or default_settings()
+    if settings.qdrant_path:
+        path = Path(settings.qdrant_path)
         if not create and not path.exists():
             raise VectorStoreError(
                 f"No local Qdrant store at {path}. Run `python cli.py ingest <file>` first, "
                 f"or point QDRANT_PATH at the existing store (relative paths are resolved "
-                f"from {config.BASE_DIR})."
+                f"from {settings.project_dir})."
             )
         try:
             return QdrantClient(path=str(path))
@@ -62,16 +64,17 @@ def get_client(create: bool = True) -> QdrantClient:
                     "allows one process at a time: stop the other one, or run a Qdrant "
                     "server and set QDRANT_URL instead of QDRANT_PATH."
                 ) from exc
-            raise VectorStoreError(f"Could not open {describe_location()}: {exc}") from exc
-    return QdrantClient(url=config.QDRANT_URL, api_key=config.QDRANT_API_KEY)
+            raise VectorStoreError(f"Could not open {describe_location(settings)}: {exc}") from exc
+    return QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
 
 
-def collection_exists(client: QdrantClient, name: str) -> bool:
+def collection_exists(client: QdrantClient, name: str,
+                      settings: Optional[Settings] = None) -> bool:
     try:
         return client.collection_exists(name)
     except Exception as exc:
         raise VectorStoreError(
-            f"Cannot reach {describe_location()}: {exc}. Start the server "
+            f"Cannot reach {describe_location(settings)}: {exc}. Start the server "
             "(docker run -p 6333:6333 qdrant/qdrant) or set QDRANT_PATH for local mode."
         ) from exc
 
@@ -83,21 +86,24 @@ def collection_dimension(client: QdrantClient, name: str) -> int:
     return vectors.size
 
 
-def check_dimension(client: QdrantClient, name: str, expected: int) -> None:
+def check_dimension(client: QdrantClient, name: str, expected: int,
+                    settings: Optional[Settings] = None) -> None:
     actual = collection_dimension(client, name)
     if actual != expected:
         raise VectorStoreError(
             f"Collection '{name}' holds {actual}-dimensional vectors, but "
-            f"{config.EMBEDDING_MODEL} produces {expected}. Vectors from different models "
+            f"{(settings or default_settings()).embedding_model} produces {expected}. Vectors from different models "
             "are not comparable: set EMBEDDING_MODEL back to the model that built this "
             "collection, use another COLLECTION_NAME, or rebuild it with --recreate."
         )
 
 
 def ensure_collection(client: QdrantClient, dimension: int, recreate: bool = False,
-                      collection: Optional[str] = None) -> None:
-    name = collection or config.COLLECTION_NAME
-    exists = collection_exists(client, name)
+                      collection: Optional[str] = None,
+                      settings: Optional[Settings] = None) -> None:
+    settings = settings or default_settings()
+    name = collection or settings.collection_name
+    exists = collection_exists(client, name, settings)
 
     if exists and recreate:
         client.delete_collection(name)
@@ -105,7 +111,7 @@ def ensure_collection(client: QdrantClient, dimension: int, recreate: bool = Fal
         print(f"    dropped old collection '{name}'")
 
     if exists:
-        check_dimension(client, name, dimension)
+        check_dimension(client, name, dimension, settings)
         return
 
     client.create_collection(
@@ -116,27 +122,31 @@ def ensure_collection(client: QdrantClient, dimension: int, recreate: bool = Fal
 
 
 def get_vector_store(embeddings, client: QdrantClient = None,
-                     collection: Optional[str] = None) -> QdrantVectorStore:
+                     collection: Optional[str] = None,
+                     settings: Optional[Settings] = None) -> QdrantVectorStore:
+    settings = settings or default_settings()
     return QdrantVectorStore(
-        client=client or get_client(),
-        collection_name=collection or config.COLLECTION_NAME,
+        client=client or get_client(settings=settings),
+        collection_name=collection or settings.collection_name,
         embedding=embeddings,
     )
 
 
 def open_vector_store(embeddings, client: QdrantClient,
-                      collection: Optional[str] = None) -> QdrantVectorStore:
+                      collection: Optional[str] = None,
+                      settings: Optional[Settings] = None) -> QdrantVectorStore:
     """Read side: validate that the collection exists and matches the model."""
-    name = collection or config.COLLECTION_NAME
-    if not collection_exists(client, name):
+    settings = settings or default_settings()
+    name = collection or settings.collection_name
+    if not collection_exists(client, name, settings):
         found = [c.name for c in client.get_collections().collections]
         raise VectorStoreError(
-            f"Collection '{name}' does not exist in {describe_location()} "
+            f"Collection '{name}' does not exist in {describe_location(settings)} "
             f"(found: {', '.join(found) or 'none'}). Ingest a document first, or fix "
             "COLLECTION_NAME."
         )
-    check_dimension(client, name, detect_dimension(embeddings))
-    return get_vector_store(embeddings, client, name)
+    check_dimension(client, name, detect_dimension(embeddings, settings), settings)
+    return get_vector_store(embeddings, client, name, settings)
 
 
 def chunk_point_id(metadata: dict) -> str:
@@ -152,22 +162,25 @@ def _source_filter(source_file: str, keep_ids: Optional[List[str]] = None) -> mo
 
 
 def store_chunks(chunks: List[Document], embeddings, recreate: bool = False,
-                 client: QdrantClient = None, collection: Optional[str] = None) -> dict:
+                 client: QdrantClient = None, collection: Optional[str] = None,
+                 settings: Optional[Settings] = None) -> dict:
     if not chunks:
         raise EmptyDocumentError("Nothing to store: the document produced no chunks.")
 
-    client = client or get_client()
-    name = collection or config.COLLECTION_NAME
-    ensure_collection(client, detect_dimension(embeddings), recreate=recreate, collection=name)
-    store = get_vector_store(embeddings, client, name)
+    settings = settings or default_settings()
+    client = client or get_client(settings=settings)
+    name = collection or settings.collection_name
+    ensure_collection(client, detect_dimension(embeddings, settings), recreate=recreate,
+                      collection=name, settings=settings)
+    store = get_vector_store(embeddings, client, name, settings)
     ids = [chunk_point_id(c.metadata) for c in chunks]
 
     # Gemini caps a single embed call at 100 texts, so send in batches.
     # On the free tier it also caps ~100 texts/minute, so pause between batches.
-    batch = config.EMBED_BATCH_SIZE
+    batch = settings.embed_batch_size
     for i, start in enumerate(range(0, len(chunks), batch)):
-        if i > 0 and config.EMBED_SLEEP:
-            time.sleep(config.EMBED_SLEEP)
+        if i > 0 and settings.embed_sleep:
+            time.sleep(settings.embed_sleep)
         try:
             store.add_documents(chunks[start:start + batch], ids=ids[start:start + batch])
         except RagError:
@@ -199,11 +212,14 @@ def store_chunks(chunks: List[Document], embeddings, recreate: bool = False,
 
 
 def delete_document(client: QdrantClient, source_file: str,
-                    collection: Optional[str] = None) -> int:
+                    collection: Optional[str] = None,
+                    settings: Optional[Settings] = None) -> int:
     """Remove every chunk of one file. Returns how many were deleted."""
-    name = collection or config.COLLECTION_NAME
-    if not collection_exists(client, name):
-        raise VectorStoreError(f"Collection '{name}' does not exist in {describe_location()}.")
+    settings = settings or default_settings()
+    name = collection or settings.collection_name
+    if not collection_exists(client, name, settings):
+        raise VectorStoreError(
+            f"Collection '{name}' does not exist in {describe_location(settings)}.")
     selector = _source_filter(source_file)
     count = client.count(name, count_filter=selector, exact=True).count
     if count:
@@ -211,11 +227,14 @@ def delete_document(client: QdrantClient, source_file: str,
     return count
 
 
-def list_documents(client: QdrantClient, collection: Optional[str] = None) -> Dict[str, int]:
+def list_documents(client: QdrantClient, collection: Optional[str] = None,
+                   settings: Optional[Settings] = None) -> Dict[str, int]:
     """File name -> number of chunks stored for it."""
-    name = collection or config.COLLECTION_NAME
-    if not collection_exists(client, name):
-        raise VectorStoreError(f"Collection '{name}' does not exist in {describe_location()}.")
+    settings = settings or default_settings()
+    name = collection or settings.collection_name
+    if not collection_exists(client, name, settings):
+        raise VectorStoreError(
+            f"Collection '{name}' does not exist in {describe_location(settings)}.")
     counts: Dict[str, int] = {}
     offset = None
     while True:

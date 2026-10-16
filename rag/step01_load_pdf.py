@@ -2,13 +2,13 @@
 
 Validate the file before anything else, so a wrong path fails here
 instead of halfway through the pipeline. PDF, plain text and Markdown are
-supported (see config.SUPPORTED_EXTENSIONS).
+supported (see rag.settings.SUPPORTED_EXTENSIONS).
 """
 
 from pathlib import Path
 
-import config
 from rag.errors import UnsupportedFileError
+from rag.settings import SUPPORTED_EXTENSIONS
 
 
 def load_document(path) -> Path:
@@ -18,10 +18,10 @@ def load_document(path) -> Path:
         raise UnsupportedFileError(f"File not found: {path}")
     if not path.is_file():
         raise UnsupportedFileError(f"Not a file: {path}")
-    if path.suffix.lower() not in config.SUPPORTED_EXTENSIONS:
+    if path.suffix.lower() not in SUPPORTED_EXTENSIONS:
         raise UnsupportedFileError(
             f"Unsupported file type '{path.suffix or '(none)'}' for {path.name}. "
-            f"Supported: {', '.join(config.SUPPORTED_EXTENSIONS)}."
+            f"Supported: {', '.join(SUPPORTED_EXTENSIONS)}."
         )
     if path.stat().st_size == 0:
         raise UnsupportedFileError(f"File is empty: {path.name}")
