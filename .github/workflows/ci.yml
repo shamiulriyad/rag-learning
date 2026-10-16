@@ -160,7 +160,11 @@ jobs:
         with:
           node-version: "20"
       - name: Build wheel and sdist (from this clean checkout)
-        run: uv build --out-dir dist
+        run: |
+          uv build --out-dir dist
+          # uv writes a "*" .gitignore into the output folder; the manifest below
+          # accepts exactly the wheel and the sdist, so remove that marker.
+          rm -f dist/.gitignore
       - name: Check archive contents (allow-list, no user data, no .gitignore)
         run: python scripts/check_dist.py dist
       - name: Check metadata renders on PyPI

@@ -154,6 +154,12 @@ def test_manifests_come_from_the_ci_build_job(ci):
     runs = [s.get("run", "") for s in build["steps"]]
     assert any("check_dist.py" in r for r in runs)
     assert any("check_sdist_build.py" in r for r in runs)
+    # uv build leaves a .gitignore in dist/; it must be gone before the strict manifest.
+    build_step = _step_index(build["steps"],
+                             lambda s: "uv build --out-dir dist" in s.get("run", ""))
+    manifest_step = _step_index(build["steps"], lambda s: s.get("id") == "manifest")
+    assert "rm -f dist/.gitignore" in build["steps"][build_step]["run"]
+    assert build_step < manifest_step
 
 
 def test_npm_publish_is_the_verified_file_without_scripts(release):
