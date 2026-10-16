@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0rc1 (release candidate)
+
+Release candidate for 0.1.0, used to rehearse the release on TestPyPI. It
+contains everything listed under 0.1.0 below; the generator's npm version is
+`0.1.0-rc.1`. Rehearsals never publish to PyPI or npm.
+
 ## 0.1.0 (unreleased)
 
 First packaged release: the toolkit is now the installable Python package
