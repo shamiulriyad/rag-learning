@@ -23,6 +23,26 @@ TEST_SETTINGS = Settings.load(ROOT)
 set_default_settings(TEST_SETTINGS)
 
 
+# No test may reach the network. With pytest-socket installed (the dev extra
+# installs it) every test may only connect to this machine; socket creation
+# stays allowed, since asyncio on Windows talks to itself over 127.0.0.1.
+# Subprocesses started by tests are not covered by this guard.
+LOCAL_HOSTS = ["127.0.0.1", "::1", "localhost"]
+
+try:
+    import pytest_socket  # noqa: F401
+except ImportError:
+    pytest_socket = None
+
+
+def pytest_collection_modifyitems(items):
+    if pytest_socket is None:
+        return
+    for item in items:
+        if item.get_closest_marker("allow_hosts") is None:
+            item.add_marker(pytest.mark.allow_hosts(LOCAL_HOSTS))
+
+
 @pytest.fixture
 def test_settings() -> Settings:
     return TEST_SETTINGS
