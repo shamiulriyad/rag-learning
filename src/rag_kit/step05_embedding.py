@@ -16,6 +16,11 @@ from rag_kit.settings import Settings, default_settings
 
 logger = logging.getLogger(__name__)
 
+LOCAL_EXTRA_HINT = ('EMBEDDING_PROVIDER=huggingface needs the local extra: '
+                    'pip install "rag-kit[local]"')
+GEMINI_EXTRA_HINT = ('EMBEDDING_PROVIDER=google needs the gemini extra: '
+                     'pip install "rag-kit[gemini]"')
+
 
 def get_embeddings(settings: Optional[Settings] = None):
     settings = settings or default_settings()
@@ -24,12 +29,11 @@ def get_embeddings(settings: Optional[Settings] = None):
         try:
             from langchain_huggingface import HuggingFaceEmbeddings
         except ImportError as exc:
-            raise EmbeddingProviderError(
-                "EMBEDDING_PROVIDER=huggingface needs `pip install langchain-huggingface "
-                f"sentence-transformers` ({exc})."
-            ) from exc
+            raise EmbeddingProviderError(f"{LOCAL_EXTRA_HINT} ({exc}).") from exc
         try:
             embeddings = HuggingFaceEmbeddings(model_name=settings.embedding_model)
+        except ImportError as exc:  # sentence-transformers is imported only here
+            raise EmbeddingProviderError(f"{LOCAL_EXTRA_HINT} ({exc}).") from exc
         except Exception as exc:
             raise EmbeddingProviderError(
                 f"Could not load embedding model {settings.embedding_model!r}: {exc}. "
@@ -42,9 +46,7 @@ def get_embeddings(settings: Optional[Settings] = None):
     try:
         from langchain_google_genai import GoogleGenerativeAIEmbeddings
     except ImportError as exc:
-        raise EmbeddingProviderError(
-            f"EMBEDDING_PROVIDER=google needs `pip install langchain-google-genai` ({exc})."
-        ) from exc
+        raise EmbeddingProviderError(f"{GEMINI_EXTRA_HINT} ({exc}).") from exc
 
     embeddings = GoogleGenerativeAIEmbeddings(
         model=settings.embedding_model,
