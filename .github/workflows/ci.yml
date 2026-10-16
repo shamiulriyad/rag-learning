@@ -14,6 +14,13 @@ on:
     branches: [main]
   workflow_dispatch:
   workflow_call: # release.yml runs the whole CI, including the PyTorch jobs
+    outputs:
+      python-manifest:
+        description: SHA-256 manifest of the wheel and sdist built by the build job
+        value: ${{ jobs.build.outputs.python-manifest }}
+      npm-manifest:
+        description: SHA-256 and sha512 integrity of the npm tarball built by the build job
+        value: ${{ jobs.build.outputs.npm-manifest }}
 
 permissions:
   contents: read
@@ -53,7 +60,7 @@ jobs:
       - name: Ruff
         run: uvx ruff@0.17.1 check .
       - name: Package and generator versions are in sync
-        run: uv run --no-project --with "packaging>=24" python scripts/check_versions.py
+        run: uv run --no-project --with "packaging==26.3" python scripts/check_versions.py
       - name: README links resolve in this commit
         run: python3 scripts/check_readme_links.py
 
@@ -125,7 +132,8 @@ jobs:
               for platform in windows linux macos; do
                 echo "== $resolution $python $platform"
                 uv pip compile pyproject.toml --extra all --extra dev --python-version "$python" \
-                  --python-platform "$platform" --resolution "$resolution" -q -o /dev/null
+                  --python-platform "$platform" --resolution "$resolution" -q \
+                  -o "$RUNNER_TEMP/resolved-$resolution-$python-$platform.txt" # not /dev/null: uv renames onto it
               done
             done
           done
@@ -133,6 +141,10 @@ jobs:
   build:
     name: build and check distributions
     runs-on: ubuntu-latest
+    # The release workflow publishes only files whose hashes match these outputs.
+    outputs:
+      python-manifest: ${{ steps.manifest.outputs.python-manifest }}
+      npm-manifest: ${{ steps.manifest.outputs.npm-manifest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -153,6 +165,8 @@ jobs:
         run: python scripts/check_dist.py dist
       - name: Check metadata renders on PyPI
         run: uvx twine@7.0.0 check --strict dist/*
+      - name: The sdist builds the same package as the wheel
+        run: python scripts/ci/check_sdist_build.py --sdist dist/*.tar.gz --wheel dist/*.whl
       - name: Pack the generator
         run: |
           mkdir -p dist-npm
@@ -162,8 +176,11 @@ jobs:
           test "$(tar -tzf "$tarball" | wc -l)" -eq 20
           # The bin script must be executable (exact bits depend on the runner's umask).
           test "$(tar -tvzf "$tarball" package/bin/rag-kit-dev.js | cut -c1-4)" = "-rwx"
-      - name: Checksums
-        run: sha256sum dist/* dist-npm/* | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Expected-artifact manifest (exact file list and hashes, for the release workflow)
+        id: manifest
+        run: |
+          uv run --no-project --with "packaging==26.3" python scripts/release_gate.py \
+            --github-output "$GITHUB_OUTPUT" manifest --dist dist --npm dist-npm
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: python-dist
