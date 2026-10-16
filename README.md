@@ -68,15 +68,30 @@ Choose extras for what you need:
 | `dev` | pytest, httpx, ruff (+ `api`) | running the tests |
 | `all` | `local`, `gemini`, `api`, `ui` | everything |
 
-**Linux and CPU-only PyTorch:** on Linux, PyPI's PyTorch includes CUDA
-libraries (several GB). For CPU-only embeddings, install the CPU build first:
+**Linux and CPU-only PyTorch (recommended):** on Linux, PyTorch from PyPI
+pulls in CUDA libraries (several GB). For CPU-only local embeddings, install
+the CPU build from PyTorch's own index **first**, in the same virtual
+environment, then rag-kit:
 
 ```bash
 pip install torch --index-url https://download.pytorch.org/whl/cpu
-pip install -e ".[local,gemini]"
+pip install -e ".[local,gemini]"           # keeps the CPU torch that is installed
+
+# with uv instead of pip:
+uv pip install torch --index-url https://download.pytorch.org/whl/cpu
+uv pip install -e ".[local,gemini]"
 ```
 
-On Windows and macOS, PyTorch from PyPI does not pull in CUDA libraries.
+This works on x86_64 and aarch64 Linux with Python 3.11 and 3.12. Later
+`pip install -U "rag-kit[local]"` keeps the CPU build as long as it satisfies
+the requirement; upgrading torch itself (`pip install -U torch`) without the
+`--index-url` above would switch to the CUDA build. If a CUDA build is already
+installed, start from a fresh virtual environment: reinstalling torch over it
+leaves the `nvidia-*` packages behind. With an NVIDIA GPU you want to use,
+skip the first command.
+
+On Windows and macOS, PyTorch from PyPI does not pull in CUDA libraries, so no
+extra step is needed.
 
 ## Set up a project
 
