@@ -78,7 +78,11 @@ export async function runSteps(steps, { cwd, env, run, log }) {
   for (let i = 0; i < steps.length; i += 1) {
     const step = steps[i];
     log(`\n> ${step.label}\n  ${formatCommand(step.command, step.args)}`);
-    const result = await run(step.command, step.args, { cwd, env, inherit: true });
+    // A relative program path (.venv/bin/python) is the project's: resolve it here
+    // instead of relying on how each OS resolves relative executables.
+    const command = /[\\/]/.test(step.command) && !path.isAbsolute(step.command)
+      ? path.resolve(cwd, step.command) : step.command;
+    const result = await run(command, step.args, { cwd, env, inherit: true });
     if (result.code !== 0) {
       return { ok: false, completed, failed: step, remaining: steps.slice(i), error: result.error };
     }

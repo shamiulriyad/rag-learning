@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import { test } from "node:test";
 
 import {
   CPU_TORCH_INDEX, installEnv, installPlan, packageSpecWithExtras, pinnedRequirement, runSteps, TEST_PYPI_INDEX,
+  venvPython,
 } from "../lib/install.js";
 
 const BASE = { pythonExecutable: "/usr/bin/python3.11", gpu: false, packageSpec: undefined, testPypi: false,
@@ -94,6 +96,19 @@ test("--test-pypi takes only rag-kit from TestPyPI, without dependencies", () =>
 test("uv may never download its own Python", () => {
   assert.equal(installEnv({ PATH: "x" }).UV_PYTHON_DOWNLOADS, "never");
   assert.equal(installEnv({ PATH: "x" }).PATH, "x");
+});
+
+test("runSteps runs the project's .venv python by absolute path; PATH commands stay as they are", async () => {
+  const steps = installPlan({ ...BASE, platform: process.platform === "win32" ? "win32" : "linux",
+    useUv: false, embeddings: "gemini" });
+  const ran = [];
+  const run = async (command) => { ran.push(command); return { code: 0 }; };
+  const cwd = path.resolve("project-folder");
+  await runSteps([...steps, { label: "uv", command: "uv", args: [] }], { cwd, env: {}, run, log: () => {} });
+  assert.equal(ran[0], "/usr/bin/python3.11");                 // already absolute
+  assert.equal(ran[1], path.resolve(cwd, venvPython(process.platform === "win32" ? "win32" : "linux")));
+  assert.ok(path.isAbsolute(ran[1]));
+  assert.equal(ran[2], "uv");                                   // found on PATH
 });
 
 test("runSteps stops at the first failure and reports what is left", async () => {
