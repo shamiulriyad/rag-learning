@@ -52,7 +52,8 @@ test("--help and --version", async () => {
   assert.equal((await generate(["--help"])).code, 0);
   const version = await generate(["--version"]);
   assert.equal(version.code, 0);
-  assert.equal(version.out.trim(), "0.1.0");
+  const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+  assert.equal(version.out.trim(), pkg.version);
 });
 
 test("usage and validation errors exit 2 and create nothing", async () => {
