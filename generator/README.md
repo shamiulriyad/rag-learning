@@ -60,7 +60,8 @@ rag-kit-dev **never creates `.env` and never asks for an API key**. Copy
 -h, --help / -v, --version
 ```
 
-Testing only: `--package-spec SPEC` installs rag-kit from a local wheel or a
+Testing only: `--package-spec SPEC` installs rag-kit from a local wheel (a
+relative path is taken from the folder you run the command in) or a
 requirement such as `ragkit-dev==0.1.0rc1`; `--test-pypi` takes ragkit-dev (and
 only ragkit-dev) from TestPyPI.
 

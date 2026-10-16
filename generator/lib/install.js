@@ -31,6 +31,21 @@ export function legacyPackageSpecError(spec) {
     `use "${suggestion}".`;
 }
 
+// The install runs inside the new project folder, so a local path given to
+// --package-spec (as pip tells paths from requirements: a path separator, a
+// leading ".", or an archive name) is made absolute from the folder the command
+// was run in. Requirements and URLs are returned unchanged.
+export function resolvePackageSpec(spec, cwd, platform = process.platform) {
+  const text = spec.trim();
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text) || text.includes("@")) {
+    return spec;
+  }
+  if (/[\\/]/.test(text) || text.startsWith(".") || /\.(whl|tar\.gz|zip)$/i.test(text)) {
+    return (platform === "win32" ? path.win32 : path.posix).resolve(cwd, text);
+  }
+  return spec;
+}
+
 // What to install for --package-spec: a requirement string gets the extras
 // added after its name; anything else (a wheel, an sdist, a folder) gets them appended.
 export function packageSpecWithExtras(spec, embeddings) {

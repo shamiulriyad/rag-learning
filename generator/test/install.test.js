@@ -4,7 +4,7 @@ import { test } from "node:test";
 
 import {
   CPU_TORCH_INDEX, installEnv, installPlan, legacyPackageSpecError, packageSpecWithExtras, pinnedRequirement,
-  runSteps, TEST_PYPI_INDEX, venvPython,
+  resolvePackageSpec, runSteps, TEST_PYPI_INDEX, venvPython,
 } from "../lib/install.js";
 
 const BASE = { pythonExecutable: "/usr/bin/python3.11", gpu: false, packageSpec: undefined, testPypi: false,
@@ -31,6 +31,23 @@ test("--package-spec accepts repeated separators in ragkit-dev", () => {
   assert.equal(packageSpecWithExtras("ragkit--dev==0.1.0", "gemini"), "ragkit-dev[gemini]==0.1.0");
   assert.equal(packageSpecWithExtras("ragkit__dev==0.1.0", "gemini"), "ragkit-dev[gemini]==0.1.0");
   assert.equal(packageSpecWithExtras("ragkit..dev", "local"), "ragkit-dev[local,gemini]");
+});
+
+test("--package-spec paths are made absolute from the folder the command runs in", () => {
+  assert.equal(resolvePackageSpec("dist/ragkit_dev-0.1.0-py3-none-any.whl", "/home/me/repo", "linux"),
+    "/home/me/repo/dist/ragkit_dev-0.1.0-py3-none-any.whl");
+  assert.equal(resolvePackageSpec("dist/ragkit_dev-0.1.0-py3-none-any.whl", "E:\\repo", "win32"),
+    "E:\\repo\\dist\\ragkit_dev-0.1.0-py3-none-any.whl");
+  assert.equal(resolvePackageSpec("dist\\ragkit_dev-0.1.0.tar.gz", "E:\\repo", "win32"), "E:\\repo\\dist\\ragkit_dev-0.1.0.tar.gz");
+  assert.equal(resolvePackageSpec("ragkit_dev-0.1.0-py3-none-any.whl", "/r", "linux"), "/r/ragkit_dev-0.1.0-py3-none-any.whl");
+  assert.equal(resolvePackageSpec(".", "/r/rag-learning", "linux"), "/r/rag-learning");
+  assert.equal(resolvePackageSpec("../rag-learning", "/r/other", "linux"), "/r/rag-learning");
+  assert.equal(resolvePackageSpec("/abs/dist/x.whl", "/r", "linux"), "/abs/dist/x.whl");
+  assert.equal(resolvePackageSpec("C:\\dist\\x.whl", "E:\\repo", "win32"), "C:\\dist\\x.whl");
+  for (const spec of ["ragkit-dev==0.1.0rc1", "ragkit-dev[gemini]>=0.1", "ragkit-dev",
+    "https://example.org/ragkit_dev-0.1.0-py3-none-any.whl", "ragkit-dev @ file:///r/dist/x.whl"]) {
+    assert.equal(resolvePackageSpec(spec, "/r", "linux"), spec);
+  }
 });
 
 test("a legacy rag-kit requirement is refused, never turned into a malformed spec", () => {
