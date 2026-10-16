@@ -31,6 +31,15 @@ from rag.errors import ConfigError
 
 SUPPORTED_EXTENSIONS = (".pdf", ".txt", ".md")
 
+# Every variable Settings.load() reads. rag.env never exports these to
+# os.environ (see rag/env.py); RAG_* control variables are excluded there too.
+SETTING_NAMES = frozenset({
+    "PDF_PATH", "PDF_FONT_REPAIR", "CHUNK_SIZE", "CHUNK_OVERLAP", "GOOGLE_API_KEY",
+    "EMBEDDING_PROVIDER", "EMBEDDING_MODEL", "EMBEDDING_DIM", "EMBED_BATCH_SIZE", "EMBED_SLEEP",
+    "QDRANT_URL", "QDRANT_API_KEY", "QDRANT_PATH", "COLLECTION_NAME", "TOP_K", "MIN_SCORE",
+    "LLM_MODEL", "TEMPERATURE",
+})
+
 # Marks a project folder. Only its presence matters for now; the contents are
 # reserved for future settings.
 PROJECT_MARKER = "rag-kit.toml"
@@ -232,9 +241,8 @@ def set_default_settings(settings: Settings) -> None:
 def default_settings() -> Settings:
     """The settings registered with set_default_settings().
 
-    In this checkout, importing `config` registers the project's .env (and
-    exports it to os.environ, as the toolkit always has). Packaging replaces
-    this with project-directory discovery.
+    In this checkout, importing `config` registers the project's .env.
+    Packaging replaces this with project-directory discovery.
     """
     if _default is None:
         import config  # noqa: F401 - registers its settings on import

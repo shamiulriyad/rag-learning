@@ -25,6 +25,7 @@ import sys
 from pathlib import Path
 
 import config
+from rag.env import export_env_file
 from rag.errors import RagError
 from rag.log import show_progress
 
@@ -120,6 +121,9 @@ def cmd_check(args) -> int:
     line("info", "embedding", f"{config.EMBEDDING_PROVIDER}: {config.EMBEDDING_MODEL}")
     line("info", "llm", config.LLM_MODEL)
     line("info", "pdf font repair", "on" if config.PDF_FONT_REPAIR else "off")
+    exported = getattr(args, "exported_env", [])
+    line("info", "env export", f"from .env: {', '.join(exported)} ({len(exported)})"
+         if exported else "nothing exported from .env")
 
     deps_ok, rows = dependency_report()
     ok = ok and deps_ok
@@ -403,6 +407,9 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     show_progress()  # step progress to stdout (stderr under --json, see _quiet)
+    # Before any command: HF_HOME, proxies etc. from .env must be in the environment
+    # before Hugging Face is first imported. Child processes (serve/ui) inherit them.
+    args.exported_env = export_env_file(config.SETTINGS)
     try:
         return args.func(args)
     except RagError as exc:

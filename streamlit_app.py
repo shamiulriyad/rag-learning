@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
 import config  # noqa: E402
+from rag.env import export_env_file  # noqa: E402
 from rag.errors import RagError  # noqa: E402
 from rag.log import show_progress  # noqa: E402
 from rag.pipeline import Pipeline  # noqa: E402
@@ -27,6 +28,7 @@ UPLOAD_DIR = ROOT / "uploads"
 
 st.set_page_config(page_title="RAG toolkit - test UI", layout="wide")
 show_progress()  # step progress in the terminal running streamlit, as before
+export_env_file(config.SETTINGS)  # HF_HOME, proxies etc. before the model loads
 
 
 @st.cache_resource(show_spinner="Loading embedding model...")

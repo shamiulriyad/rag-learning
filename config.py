@@ -9,15 +9,13 @@ and relative paths in it are resolved against this directory - never against
 the current working directory - so running a command from somewhere else
 cannot silently point at a different, empty Qdrant store.
 
-As before, the .env values are also exported to os.environ (existing
-environment variables win), so other libraries still see settings such as
-HF_HOME or proxy variables placed there.
+Importing this module no longer copies .env into os.environ. The CLI, the API
+service and the UI do that explicitly, for an allow-list of keys only (see
+rag/env.py).
 """
 
 import os
 from pathlib import Path
-
-from dotenv import load_dotenv
 
 from rag.errors import ConfigError  # noqa: F401 - re-exported
 from rag.settings import SUPPORTED_EXTENSIONS, Settings, set_default_settings  # noqa: F401
@@ -25,7 +23,6 @@ from rag.settings import SUPPORTED_EXTENSIONS, Settings, set_default_settings  #
 BASE_DIR = Path(__file__).resolve().parent
 
 ENV_FILE = Path(os.getenv("RAG_ENV_FILE") or (BASE_DIR / ".env"))
-load_dotenv(ENV_FILE)
 
 SETTINGS = Settings.load(BASE_DIR, env_file=ENV_FILE)
 set_default_settings(SETTINGS)

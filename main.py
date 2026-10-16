@@ -29,10 +29,11 @@ from typing import List, Optional
 from fastapi import Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from rag.env import export_env_file
 from rag.errors import RagError
 from rag.log import show_progress
 from rag.pipeline import Pipeline
-from rag.settings import Settings
+from rag.settings import Settings, default_settings
 from rag.step11_answer import strip_markers  # noqa: F401 - re-exported for callers
 
 logger = logging.getLogger("rag.api")  # under "rag" so show_progress() prints it
@@ -63,6 +64,14 @@ async def lifespan(app: FastAPI):
     # collection has not been ingested yet) the service still starts and /health
     # stays green; /query then returns a clear 503.
     show_progress()
+    if app.state.export_env:
+        # Before the pipeline loads the embedding model (see rag/env.py).
+        try:
+            exported = export_env_file(app.state.settings or default_settings())
+            if exported:
+                logger.info(f"[startup] exported from .env: {', '.join(exported)}")
+        except RagError as exc:
+            logger.warning(f"[startup] .env not exported: {exc}")
     if os.getenv("RAG_API_WARMUP", "1") == "1":
         try:
             _pipeline_for(app).warm_up()
@@ -120,13 +129,17 @@ def query(body: QueryIn, pipeline: Pipeline = Depends(get_pipeline)) -> AnswerOu
     )
 
 
-def create_app(settings: Optional[Settings] = None,
-               pipeline: Optional[Pipeline] = None) -> FastAPI:
+def create_app(settings: Optional[Settings] = None, pipeline: Optional[Pipeline] = None,
+               export_env: bool = False) -> FastAPI:
     """A service with its own Pipeline. Without `pipeline`, one is created from
     `settings` (default: the project's .env) on first use and closed on shutdown;
-    a pipeline passed in is left for the caller to close."""
+    a pipeline passed in is left for the caller to close.
+
+    export_env=True copies allow-listed .env keys (HF_HOME, proxies, ...) into
+    os.environ at startup; only the default `app` does that (see rag/env.py)."""
     app = FastAPI(title="RAG toolkit service", lifespan=lifespan)
     app.state.settings = settings
+    app.state.export_env = export_env
     app.state.pipeline = pipeline
     app.state.owns_pipeline = False
     app.state.pipeline_lock = threading.Lock()
@@ -135,4 +148,4 @@ def create_app(settings: Optional[Settings] = None,
     return app
 
 
-app = create_app()
+app = create_app(export_env=True)
