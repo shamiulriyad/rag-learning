@@ -5,16 +5,16 @@ and source-grounded answers. Index PDF, text and Markdown files into Qdrant,
 then ask questions and get answers that cite the chunks (and PDF page numbers)
 they came from.
 
-Every pipeline step is its own module under [`src/rag_kit/`](src/rag_kit/), so
+Every pipeline step is its own module under [`src/rag_kit/`](https://github.com/shamiulriyad/rag-learning/tree/main/src/rag_kit), so
 you can read, test and swap each one. Use it from the `rag-kit` command, from
 Python, through an optional FastAPI service, or through an optional Streamlit
 test UI.
 
-![Pipeline: ingest (load, extract, clean, chunk, embed, store in Qdrant) and query (question, embed, retrieve, Gemini, answer with sources); CLI, FastAPI and Streamlit all call the same Pipeline](docs/architecture.svg)
+![Pipeline: ingest (load, extract, clean, chunk, embed, store in Qdrant) and query (question, embed, retrieve, Gemini, answer with sources); CLI, FastAPI and Streamlit all call the same Pipeline](https://raw.githubusercontent.com/shamiulriyad/rag-learning/main/docs/architecture.svg)
 
 > **Status:** 0.1.0, not yet published to PyPI. Install from a checkout (see
 > below). Upgrading from the script-based version? See
-> [CHANGELOG.md](CHANGELOG.md) for the old-to-new command table.
+> [CHANGELOG.md](https://github.com/shamiulriyad/rag-learning/blob/main/CHANGELOG.md) for the old-to-new command table.
 
 ## What it does
 
@@ -31,8 +31,8 @@ test UI.
 | 11 Answer | `step11_answer.py` | answer plus the sources behind each marker |
 
 Step 7 (the question) comes from the CLI, the API or the UI.
-[`pipeline.py`](src/rag_kit/pipeline.py) wires the steps together; the CLI,
-API and UI all use it. See [docs/pipeline.md](docs/pipeline.md) for per-step
+[`pipeline.py`](https://github.com/shamiulriyad/rag-learning/blob/main/src/rag_kit/pipeline.py) wires the steps together; the CLI,
+API and UI all use it. See [docs/pipeline.md](https://github.com/shamiulriyad/rag-learning/blob/main/docs/pipeline.md) for per-step
 notes.
 
 ## Prerequisites
@@ -284,7 +284,7 @@ on its own; call `rag_kit.log.show_progress()` (as the CLI does) or configure
 
 Some PDFs embed subset fonts without a `ToUnicode` map, and every extractor
 returns scrambled glyphs (`& ? ! & &`).
-[`pdf_font_repair.py`](src/rag_kit/pdf_font_repair.py) reverses that
+[`pdf_font_repair.py`](https://github.com/shamiulriyad/rag-learning/blob/main/src/rag_kit/pdf_font_repair.py) reverses that
 substitution for the `-Free-English-Grammar.pdf` kept in this repository (it
 is not part of any package). It is off by default; enable it with
 `PDF_FONT_REPAIR=true` or `--font-repair on`. Its maps are specific to that
@@ -336,4 +336,4 @@ uniquely named collection inside a temporary Qdrant folder. Stop `serve` and
 
 ## License
 
-[MIT](LICENSE)
+[MIT](https://github.com/shamiulriyad/rag-learning/blob/main/LICENSE)
