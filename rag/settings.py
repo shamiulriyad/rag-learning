@@ -1,7 +1,13 @@
 """All tunable settings as one immutable object.
 
     settings = Settings.load(project_dir)          # project_dir/.env + environment
+    settings = Settings.load()                     # find the project (see below)
     pipeline = Pipeline(settings=settings)
+
+A project is a folder containing a `rag-kit.toml` marker file. Without an
+explicit project_dir, it is $RAG_PROJECT_DIR, else the nearest folder at or
+above the current directory that has the marker; if there is none, loading
+fails instead of guessing (a guess would scatter Qdrant stores around).
 
 `Settings.load` reads the project's `.env` without touching `os.environ`, and
 real environment variables win over `.env`. Relative paths in it (`QDRANT_PATH`,
@@ -24,6 +30,42 @@ from dotenv import dotenv_values
 from rag.errors import ConfigError
 
 SUPPORTED_EXTENSIONS = (".pdf", ".txt", ".md")
+
+# Marks a project folder. Only its presence matters for now; the contents are
+# reserved for future settings.
+PROJECT_MARKER = "rag-kit.toml"
+
+_PACKAGE_DIR = Path(__file__).resolve().parent
+
+
+def find_project_dir(start=None, environ: Optional[Mapping[str, str]] = None) -> Path:
+    """$RAG_PROJECT_DIR if set, else the nearest folder at or above `start`
+    (default: the current directory) that contains rag-kit.toml."""
+    environ = os.environ if environ is None else environ
+    if environ.get("RAG_PROJECT_DIR"):
+        return _checked_project_dir(environ["RAG_PROJECT_DIR"], "RAG_PROJECT_DIR")
+
+    start = Path(start or os.getcwd()).resolve()
+    for folder in (start, *start.parents):
+        if (folder / PROJECT_MARKER).is_file():
+            return _checked_project_dir(folder, "the project marker")
+    raise ConfigError(
+        f"No rag-kit project found: neither {start} nor any folder above it contains "
+        f"{PROJECT_MARKER}. Run the command inside a project, pass --project DIR, or set "
+        "RAG_PROJECT_DIR."
+    )
+
+
+def _checked_project_dir(value, source: str) -> Path:
+    path = Path(value).expanduser().resolve()
+    if not path.is_dir():
+        raise ConfigError(f"Project folder from {source} does not exist: {path}")
+    if path == _PACKAGE_DIR or _PACKAGE_DIR in path.parents:
+        raise ConfigError(
+            f"Project folder {path} is inside the installed rag-kit package. Keep documents, "
+            ".env and Qdrant data in your own project folder."
+        )
+    return path
 
 
 def _resolve(project_dir: Path, value) -> Path:
@@ -105,12 +147,17 @@ class Settings:
     temperature: float = 0.2
 
     @classmethod
-    def load(cls, project_dir, env_file=None,
+    def load(cls, project_dir=None, env_file=None,
              environ: Optional[Mapping[str, str]] = None) -> "Settings":
         """Read `env_file` (default: $RAG_ENV_FILE, else project_dir/.env) and
-        overlay `environ` (default: os.environ). Neither is modified."""
+        overlay `environ` (default: os.environ). Neither is modified.
+
+        Without project_dir the project is found with find_project_dir()."""
         environ = os.environ if environ is None else environ
-        project_dir = Path(project_dir).resolve()
+        if project_dir is None:
+            project_dir = find_project_dir(environ=environ)
+        else:
+            project_dir = _checked_project_dir(project_dir, "project_dir")
         env_file = Path(env_file or environ.get("RAG_ENV_FILE") or (project_dir / ".env"))
         values = {**dotenv_values(env_file), **environ}  # environment wins, as before
         env = _Reader(values)

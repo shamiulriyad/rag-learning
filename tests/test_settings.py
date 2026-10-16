@@ -7,7 +7,7 @@ import pytest
 
 from rag.errors import ConfigError
 from rag.pipeline import Pipeline
-from rag.settings import Settings
+from rag.settings import PROJECT_MARKER, Settings, find_project_dir
 from tests.conftest import make_text_file
 
 
@@ -97,3 +97,82 @@ def test_pipeline_uses_injected_settings(tmp_path, fake_embeddings, memory_clien
     assert pipeline.collection == "injected" and report["collection"] == "injected"
     assert report["stored"] > 3                      # chunk_size 200, not the default 1000
     assert len(pipeline.search("noun")) == 1        # top_k 1
+
+
+# --- project discovery ---------------------------------------------------------
+
+
+def _project(tmp_path: Path, name: str = "project") -> Path:
+    folder = tmp_path / name
+    folder.mkdir()
+    (folder / PROJECT_MARKER).write_text("", encoding="utf-8")
+    return folder
+
+
+def test_marker_in_current_folder_or_above_is_found(tmp_path):
+    project = _project(tmp_path)
+    nested = project / "docs" / "deep"
+    nested.mkdir(parents=True)
+
+    assert find_project_dir(start=project, environ={}) == project.resolve()
+    assert find_project_dir(start=nested, environ={}) == project.resolve()
+
+
+def test_nearest_marker_wins(tmp_path):
+    outer = _project(tmp_path, "outer")
+    inner = outer / "inner"
+    inner.mkdir()
+    (inner / PROJECT_MARKER).write_text("", encoding="utf-8")
+    assert find_project_dir(start=inner, environ={}) == inner.resolve()
+
+
+def test_rag_project_dir_wins_over_marker_and_needs_no_marker(tmp_path):
+    marked = _project(tmp_path)
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    assert find_project_dir(start=marked, environ={"RAG_PROJECT_DIR": str(plain)}) == plain.resolve()
+
+
+def test_missing_rag_project_dir_is_an_error(tmp_path):
+    with pytest.raises(ConfigError, match="RAG_PROJECT_DIR does not exist"):
+        find_project_dir(environ={"RAG_PROJECT_DIR": str(tmp_path / "nope")})
+
+
+def test_no_marker_fails_clearly_and_creates_nothing(tmp_path):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    with pytest.raises(ConfigError, match="No rag-kit project found.*--project.*RAG_PROJECT_DIR"):
+        find_project_dir(start=empty, environ={})
+    assert list(empty.iterdir()) == []
+
+
+def test_load_without_project_dir_uses_discovery(tmp_path, monkeypatch):
+    project = _project(tmp_path)
+    (project / ".env").write_text("QDRANT_PATH=store\n", encoding="utf-8")
+    monkeypatch.chdir(project)
+
+    settings = Settings.load(environ={})
+
+    assert settings.project_dir == project.resolve()
+    assert settings.qdrant_path == project.resolve() / "store"
+
+
+def test_load_with_missing_explicit_project_dir_is_an_error(tmp_path):
+    with pytest.raises(ConfigError, match="does not exist"):
+        Settings.load(tmp_path / "missing", environ={})
+
+
+def test_project_inside_the_package_is_refused():
+    import rag
+
+    package_dir = Path(rag.__file__).resolve().parent
+    with pytest.raises(ConfigError, match="inside the installed rag-kit package"):
+        Settings.load(package_dir, environ={})
+    with pytest.raises(ConfigError, match="inside the installed rag-kit package"):
+        find_project_dir(environ={"RAG_PROJECT_DIR": str(package_dir)})
+
+
+def test_this_checkout_is_a_project():
+    from tests.conftest import ROOT
+
+    assert find_project_dir(start=ROOT / "docs", environ={}) == ROOT
