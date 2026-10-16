@@ -1,0 +1,39 @@
+{
+  "name": "rag-kit-dev",
+  "version": "0.1.0",
+  "description": "Create a rag-kit project with one command: npx rag-kit-dev my-rag",
+  "type": "module",
+  "bin": {
+    "rag-kit-dev": "bin/rag-kit-dev.js"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "templates/"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "keywords": [
+    "rag",
+    "retrieval-augmented-generation",
+    "generator",
+    "scaffold",
+    "qdrant",
+    "python"
+  ],
+  "author": "Riyad",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shamiulriyad/rag-learning.git",
+    "directory": "generator"
+  },
+  "bugs": {
+    "url": "https://github.com/shamiulriyad/rag-learning/issues"
+  },
+  "homepage": "https://github.com/shamiulriyad/rag-learning/tree/main/generator#readme"
+}
