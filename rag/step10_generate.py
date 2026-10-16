@@ -10,7 +10,6 @@ from typing import List, Tuple
 from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_google_genai import ChatGoogleGenerativeAI
 
 import config
 from rag.errors import GenerationError
@@ -33,8 +32,15 @@ PROMPT = ChatPromptTemplate.from_messages([
 ])
 
 
-def get_llm() -> ChatGoogleGenerativeAI:
+def get_llm() -> "ChatGoogleGenerativeAI":  # noqa: F821 - imported on first use
     config.require_api_key()
+    # Imported here so ingestion and retrieval work without the Gemini SDK.
+    try:
+        from langchain_google_genai import ChatGoogleGenerativeAI
+    except ImportError as exc:
+        raise GenerationError(
+            f"Answer generation needs `pip install langchain-google-genai` ({exc})."
+        ) from exc
     return ChatGoogleGenerativeAI(
         model=config.LLM_MODEL,
         google_api_key=config.GOOGLE_API_KEY,
