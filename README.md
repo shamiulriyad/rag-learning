@@ -331,6 +331,7 @@ uniquely named collection inside a temporary Qdrant folder. Stop `serve` and
 | Message | Fix |
 | ------- | --- |
 | `No rag-kit project found` | Run inside a folder with `rag-kit.toml`, pass `--project DIR`, or set `RAG_PROJECT_DIR`. |
+| `[warn] .env  not created yet` (from `rag-kit check`) | Copy the template: `cp .env.example .env` (PowerShell: `Copy-Item .env.example .env`), then set `GOOGLE_API_KEY`. Without `.env`, rag-kit looks for a Qdrant server instead of a local store. |
 | `No local Qdrant store at …` | Ingest something first, or point `QDRANT_PATH` at the existing store. |
 | `… is in use by another process` | Embedded Qdrant allows one process. Stop `serve`/`ui`/other commands, or use a Qdrant server. |
 | `Collection 'x' holds N-dimensional vectors, but … produces M` | The embedding model changed. Restore `EMBEDDING_MODEL`, use another `COLLECTION_NAME`, or `--recreate`. |

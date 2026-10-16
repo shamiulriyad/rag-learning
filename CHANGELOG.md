@@ -47,7 +47,8 @@ plus `api`, `ui` or `dev` as needed; see the README).
   `RAG_PROJECT_DIR`; `--collection` still applies to that process only.
 - **`rag-kit check`** reads dependencies from the installed package's extras
   and names the extra to install (`pip install "rag-kit[api]"`). It also
-  prints the project folder and the names of exported variables.
+  prints the project folder and the names of exported variables, and explains
+  how to create `.env` from `.env.example` when it is missing.
 - **UI uploads** go to the project's `uploads/` folder.
 - **API** returns 503 when no project can be found.
 

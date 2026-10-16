@@ -307,3 +307,51 @@ def test_every_documented_command_exists(command):
     options = {opt for action in subparsers.choices[command]._actions
                for opt in action.option_strings}
     assert {"--project", "--collection"} <= options
+
+
+# --- check: hint when the project's .env does not exist yet ----------------------
+
+
+def _check_without_env_override(project):
+    env = {k: v for k, v in os.environ.items() if k not in ("RAG_ENV_FILE", "RAG_PROJECT_DIR")}
+    env["PYTHONIOENCODING"] = "utf-8"
+    return subprocess.run([sys.executable, "-m", "rag_kit", "check"], cwd=project, env=env,
+                          capture_output=True, text=True, timeout=120)
+
+
+def test_check_explains_how_to_create_env_from_the_example(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / PROJECT_MARKER).write_text("", encoding="utf-8")
+    (project / ".env.example").write_text("GOOGLE_API_KEY=\n", encoding="utf-8")
+
+    result = _check_without_env_override(project)
+
+    assert "[warn] .env" in result.stdout
+    assert "cp .env.example .env" in result.stdout
+    assert "Copy-Item .env.example .env" in result.stdout
+    assert "Qdrant server at http://localhost:6333" in result.stdout
+    assert not (project / ".env").exists()  # check never creates it
+
+
+def test_check_without_env_or_example_points_to_the_readme(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / PROJECT_MARKER).write_text("", encoding="utf-8")
+
+    result = _check_without_env_override(project)
+
+    assert "Create .env in" in result.stdout and "cp .env.example" not in result.stdout
+    assert not (project / ".env").exists()
+
+
+def test_check_has_no_env_hint_when_env_exists(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / PROJECT_MARKER).write_text("", encoding="utf-8")
+    (project / ".env").write_text("QDRANT_PATH=qdrant_data\n", encoding="utf-8")
+
+    result = _check_without_env_override(project)
+
+    assert "[warn] .env" not in result.stdout
+    assert "(found)" in result.stdout

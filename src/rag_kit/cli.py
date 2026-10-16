@@ -111,6 +111,20 @@ def dependency_report(requirements=None):
     return ok, rows
 
 
+def _missing_env_hint(settings) -> str:
+    """How to create the missing settings file. Without it QDRANT_PATH is unset,
+    so rag-kit would look for a Qdrant server instead of a local store."""
+    defaults = f"until then defaults apply (Qdrant server at {settings.qdrant_url}, no API key)"
+    if settings.env_file != settings.project_dir / ".env":
+        return f"RAG_ENV_FILE points to a missing file; {defaults}"
+    if (settings.project_dir / ".env.example").exists():
+        return ("not created yet. In the project folder run `cp .env.example .env` "
+                "(PowerShell: `Copy-Item .env.example .env`), then set GOOGLE_API_KEY; "
+                f"{defaults}")
+    return (f"not created yet. Create .env in {settings.project_dir} (variables are listed "
+            f"in the rag-kit README); {defaults}")
+
+
 def cmd_check(args) -> int:
     ok = True
 
@@ -127,6 +141,8 @@ def cmd_check(args) -> int:
         print(f"Project     : {settings.project_dir}")
         print(f"Config file : {env_file} ({'found' if env_file.exists() else 'MISSING'})")
     print(f"Python      : {sys.version.split()[0]}")
+    if settings is not None and not settings.env_file.exists():
+        line("warn", ".env", _missing_env_hint(settings))
 
     if settings is not None:
         try:
