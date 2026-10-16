@@ -74,7 +74,8 @@ def check_sdist(path: Path, errors: list, gitignore: Path = None) -> None:
         if gitignore is None:
             errors.append(f"{path.name}: contains .gitignore; pass --gitignore with the "
                           "committed file to confirm it has no local edits")
-        elif packed_gitignore != gitignore.read_bytes():
+        # Compare text, not bytes: git archive may convert line endings (autocrlf).
+        elif _lines(packed_gitignore) != _lines(gitignore.read_bytes()):
             errors.append(f"{path.name}: .gitignore differs from {gitignore} "
                           "(built from a working tree with local edits?)")
 
@@ -94,6 +95,10 @@ def check_sdist(path: Path, errors: list, gitignore: Path = None) -> None:
     _check_metadata(path.name, metadata, errors)
     print(f"sdist  {path.name}: {len(names)} files "
           f"({sum(n.startswith('tests/') for n in relative)} in tests/)")
+
+
+def _lines(data: bytes) -> list:
+    return data.replace(b"\r\n", b"\n").split(b"\n")
 
 
 def _check_metadata(label: str, metadata, errors: list) -> None:
