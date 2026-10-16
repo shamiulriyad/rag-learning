@@ -1,7 +1,8 @@
-# Releasing rag-kit and rag-kit-dev
+# Releasing ragkit-dev and rag-kit-dev
 
-rag-kit (PyPI) and rag-kit-dev (npm) always share one version: the generator
-installs `rag-kit==<its own version>`. Releases are published only by the
+ragkit-dev (PyPI; import name `rag_kit`, command `rag-kit`) and rag-kit-dev
+(npm) always share one version: the generator installs
+`ragkit-dev==<its own version>`. Releases are published only by the
 **Release** workflow (`.github/workflows/release.yml`), never from a laptop.
 Every release decision is made by `scripts/release_gate.py`, which is tested in
 `tests/test_release_gate.py` and `tests/test_release_workflow.py`.
@@ -20,10 +21,11 @@ it, so a named environment alone proves nothing.
      exactly one rule: **tag** pattern `v*` (no branch rules).
    The workflow's `verify` job checks all of this through GitHub's API and
    refuses to publish if anything differs, or if it cannot read the settings.
-2. **TestPyPI and PyPI**: create the project `rag-kit` through a *pending
+2. **TestPyPI and PyPI**: create the project `ragkit-dev` through a *pending
    trusted publisher* for this repository, workflow `release.yml`, with
    environment `testpypi` (on test.pypi.org) and `pypi` (on pypi.org). No API
-   tokens are created or stored.
+   tokens are created or stored. A pending publisher does not reserve the
+   name; only the first upload does, separately on each index.
 3. **npm**: create the package `rag-kit-dev` and configure *trusted
    publishing* for this repository, workflow `release.yml`, environment `npm`.
    Publishing uses npm 11.5.1+ with provenance; no npm token is stored.

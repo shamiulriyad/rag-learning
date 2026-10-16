@@ -6,8 +6,8 @@
     rag-kit search "question"           retrieval only, no LLM call
     rag-kit documents [--json]          files in the collection + chunk counts
     rag-kit delete FILE_NAME            remove one document's chunks
-    rag-kit serve                       FastAPI service (needs rag-kit[api])
-    rag-kit ui                          Streamlit test UI (needs rag-kit[ui])
+    rag-kit serve                       FastAPI service (needs ragkit-dev[api])
+    rag-kit ui                          Streamlit test UI (needs ragkit-dev[ui])
 
 The project (its .env, documents and Qdrant data) is --project DIR if given,
 else RAG_PROJECT_DIR, else the nearest folder at or above the current
@@ -32,7 +32,7 @@ from rag_kit.errors import RagError
 from rag_kit.log import show_progress
 from rag_kit.settings import Settings, set_default_settings
 
-DISTRIBUTION = "rag-kit"
+DISTRIBUTION = "ragkit-dev"
 
 
 def _pipeline(args):
@@ -65,7 +65,8 @@ def _canonical(name: str) -> str:
 
 def requirement_groups(requirements) -> list:
     """(distribution name, extra or None for core) for each Requires-Dist line
-    that applies here, in order. References to rag-kit itself are skipped."""
+    that applies here, in order. References to this distribution (`ragkit-dev`) itself are
+    skipped."""
     from packaging.requirements import Requirement
 
     groups = []
@@ -92,7 +93,7 @@ def dependency_report(requirements=None):
             requirements = importlib.metadata.requires(DISTRIBUTION) or []
         except importlib.metadata.PackageNotFoundError:
             return False, [("FAIL", DISTRIBUTION, "is not installed as a package: "
-                                                  "pip install rag-kit (or pip install -e .)")]
+                                                  "pip install ragkit-dev (or pip install -e .)")]
     ok, rows, seen = True, [], set()
     for name, extra in requirement_groups(requirements):
         if _canonical(name) in seen:
@@ -104,7 +105,7 @@ def dependency_report(requirements=None):
             version = importlib.metadata.version(name)
         except importlib.metadata.PackageNotFoundError:
             ok = ok and not required
-            hint = "pip install rag-kit" if required else f'pip install "rag-kit[{extra}]"'
+            hint = "pip install ragkit-dev" if required else f'pip install "ragkit-dev[{extra}]"'
             rows.append(("FAIL" if required else "--", name, f"not installed ({purpose}): {hint}"))
         else:
             rows.append(("ok", name, f"{version} ({purpose})"))
@@ -356,7 +357,7 @@ def cmd_delete(args) -> int:
 # --- serve / ui --------------------------------------------------------------
 def _require(module: str, extra: str) -> bool:
     if importlib.util.find_spec(module) is None:
-        print(f'error: {module} is not installed. Run: pip install "rag-kit[{extra}]"',
+        print(f'error: {module} is not installed. Run: pip install "ragkit-dev[{extra}]"',
               file=sys.stderr)
         return False
     return True

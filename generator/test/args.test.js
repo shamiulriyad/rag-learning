@@ -22,7 +22,7 @@ test("defaults for a plain project name", () => {
 test("every option is parsed", () => {
   const options = parseCliArgs([
     "my-rag", "--embeddings", "local", "--gpu", "--python", "C:\\Py311\\python.exe", "--no-uv",
-    "--no-install", "-y", "--package-spec", "dist/rag_kit-0.1.0-py3-none-any.whl", "--test-pypi",
+    "--no-install", "-y", "--package-spec", "dist/ragkit_dev-0.1.0-py3-none-any.whl", "--test-pypi",
   ]);
   assert.equal(options.embeddings, "local");
   assert.equal(options.gpu, true);
@@ -30,7 +30,7 @@ test("every option is parsed", () => {
   assert.equal(options.useUv, false);
   assert.equal(options.install, false);
   assert.equal(options.yes, true);
-  assert.equal(options.packageSpec, "dist/rag_kit-0.1.0-py3-none-any.whl");
+  assert.equal(options.packageSpec, "dist/ragkit_dev-0.1.0-py3-none-any.whl");
   assert.equal(options.testPypi, true);
 });
 
@@ -48,6 +48,7 @@ test("usage errors", () => {
     [["my-rag", "--unknown"], /Unknown option/],
     [["my-rag", "--python", " "], /--python needs a value/],
     [["my-rag", "--package-spec", ""], /--package-spec needs a value/],
+    [["my-rag", "--package-spec", "rag-kit==0.1.0rc1"], /ragkit-dev, not rag-kit; use "ragkit-dev==0\.1\.0rc1"/],
   ];
   for (const [argv, message] of cases) {
     assert.throws(() => parseCliArgs(argv), (error) => error instanceof UsageError && message.test(error.message),

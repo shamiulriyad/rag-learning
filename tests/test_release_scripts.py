@@ -128,7 +128,7 @@ def test_link_problems_are_reported(tmp_path):
 # --- sdist builds the same package as the wheel ----------------------------------
 
 
-def _wheel(path, files, metadata="Name: rag-kit\n", entry_points="[console_scripts]\n"):
+def _wheel(path, files, metadata="Name: ragkit-dev\n", entry_points="[console_scripts]\n"):
     import base64
     import hashlib
     import zipfile
@@ -139,9 +139,9 @@ def _wheel(path, files, metadata="Name: rag-kit\n", entry_points="[console_scrip
             wheel.writestr(name, data)
             digest = base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode()
             record.append(f"{name},sha256={digest},{len(data)}")
-        wheel.writestr("rag_kit-0.1.0.dist-info/METADATA", metadata)
-        wheel.writestr("rag_kit-0.1.0.dist-info/entry_points.txt", entry_points)
-        wheel.writestr("rag_kit-0.1.0.dist-info/RECORD", "\n".join(record) + "\n")
+        wheel.writestr("ragkit_dev-0.1.0.dist-info/METADATA", metadata)
+        wheel.writestr("ragkit_dev-0.1.0.dist-info/entry_points.txt", entry_points)
+        wheel.writestr("ragkit_dev-0.1.0.dist-info/RECORD", "\n".join(record) + "\n")
     return path
 
 

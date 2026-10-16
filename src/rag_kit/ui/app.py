@@ -1,6 +1,6 @@
 """Optional Streamlit UI for testing the pipeline - not a production app.
 
-    pip install "rag-kit[ui]"
+    pip install "ragkit-dev[ui]"
     rag-kit ui                             # http://localhost:8501
 
 Upload and ingest documents, ask questions, and inspect the retrieved chunks.

@@ -17,9 +17,9 @@ from rag_kit.settings import Settings, default_settings
 logger = logging.getLogger(__name__)
 
 LOCAL_EXTRA_HINT = ('EMBEDDING_PROVIDER=huggingface needs the local extra: '
-                    'pip install "rag-kit[local]"')
+                    'pip install "ragkit-dev[local]"')
 GEMINI_EXTRA_HINT = ('EMBEDDING_PROVIDER=google needs the gemini extra: '
-                     'pip install "rag-kit[gemini]"')
+                     'pip install "ragkit-dev[gemini]"')
 
 
 def get_embeddings(settings: Optional[Settings] = None):

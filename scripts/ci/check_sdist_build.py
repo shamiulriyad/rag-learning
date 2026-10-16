@@ -1,7 +1,7 @@
 """Check that the sdist builds the same package as the release wheel.
 
-    python scripts/ci/check_sdist_build.py --sdist dist/rag_kit-X.tar.gz \
-        --wheel dist/rag_kit-X-py3-none-any.whl
+    python scripts/ci/check_sdist_build.py --sdist dist/ragkit_dev-X.tar.gz \
+        --wheel dist/ragkit_dev-X-py3-none-any.whl
 
 Builds a wheel from the sdist (uv build, isolated) and requires it to match
 the release wheel: identical rag_kit/ files (by the sha256 in RECORD),

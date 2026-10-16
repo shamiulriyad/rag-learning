@@ -189,8 +189,8 @@ def _artifacts(tmp_path, version="0.1.0"):
     dist, npm = tmp_path / "dist", tmp_path / "npm"
     dist.mkdir()
     npm.mkdir()
-    (dist / f"rag_kit-{version}-py3-none-any.whl").write_bytes(b"wheel bytes")
-    (dist / f"rag_kit-{version}.tar.gz").write_bytes(b"sdist bytes")
+    (dist / f"ragkit_dev-{version}-py3-none-any.whl").write_bytes(b"wheel bytes")
+    (dist / f"ragkit_dev-{version}.tar.gz").write_bytes(b"sdist bytes")
     (npm / f"rag-kit-dev-{gate.npm_form(version)}.tgz").write_bytes(b"npm tarball bytes")
     return dist, npm
 
@@ -199,7 +199,7 @@ def test_manifest_records_sha256_and_npm_integrity(tmp_path):
     dist, npm = _artifacts(tmp_path)
     manifest = gate.build_manifest(dist, "python", "0.1.0")
     assert (
-        manifest["files"]["rag_kit-0.1.0.tar.gz"]["sha256"]
+        manifest["files"]["ragkit_dev-0.1.0.tar.gz"]["sha256"]
         == hashlib.sha256(b"sdist bytes").hexdigest()
     )
     npm_manifest = gate.build_manifest(npm, "npm", "0.1.0")
@@ -211,7 +211,7 @@ def test_manifest_records_sha256_and_npm_integrity(tmp_path):
     )
 
 
-@pytest.mark.parametrize("extra, missing", [("stray.whl", None), (None, "rag_kit-0.1.0.tar.gz")])
+@pytest.mark.parametrize("extra, missing", [("stray.whl", None), (None, "ragkit_dev-0.1.0.tar.gz")])
 def test_manifest_refuses_an_unexpected_file_list(tmp_path, extra, missing):
     dist, _ = _artifacts(tmp_path)
     if extra:
@@ -235,7 +235,7 @@ def test_verified_artifacts_pass(tmp_path):
 def test_a_changed_artifact_is_refused(tmp_path):
     dist, _ = _artifacts(tmp_path)
     manifest = gate.build_manifest(dist, "python", "0.1.0")
-    (dist / "rag_kit-0.1.0-py3-none-any.whl").write_bytes(b"tampered")
+    (dist / "ragkit_dev-0.1.0-py3-none-any.whl").write_bytes(b"tampered")
     assert any(
         "sha256" in p and "does not match the build's" in p
         for p in gate.verify_artifacts(manifest, dist, "python", "0.1.0")
@@ -245,11 +245,11 @@ def test_a_changed_artifact_is_refused(tmp_path):
 def test_missing_and_extra_artifacts_are_refused(tmp_path):
     dist, _ = _artifacts(tmp_path)
     manifest = gate.build_manifest(dist, "python", "0.1.0")
-    (dist / "rag_kit-0.1.0.tar.gz").unlink()
-    (dist / "rag_kit-9.9.9-py3-none-any.whl").write_bytes(b"other")
+    (dist / "ragkit_dev-0.1.0.tar.gz").unlink()
+    (dist / "ragkit_dev-9.9.9-py3-none-any.whl").write_bytes(b"other")
     problems = gate.verify_artifacts(manifest, dist, "python", "0.1.0")
-    assert "missing artifact: rag_kit-0.1.0.tar.gz" in problems
-    assert "unexpected artifact: rag_kit-9.9.9-py3-none-any.whl" in problems
+    assert "missing artifact: ragkit_dev-0.1.0.tar.gz" in problems
+    assert "unexpected artifact: ragkit_dev-9.9.9-py3-none-any.whl" in problems
 
 
 def test_a_manifest_for_another_version_is_refused(tmp_path):
@@ -257,7 +257,7 @@ def test_a_manifest_for_another_version_is_refused(tmp_path):
     manifest = gate.build_manifest(dist, "python", "0.1.0")
     problems = gate.verify_artifacts(manifest, dist, "python", "0.1.1")
     assert any("manifest is for python 0.1.0, expected python 0.1.1" in p for p in problems)
-    assert "missing artifact: rag_kit-0.1.1.tar.gz" in problems
+    assert "missing artifact: ragkit_dev-0.1.1.tar.gz" in problems
 
 
 def test_verify_cli_reads_the_manifest_from_the_environment(tmp_path):
@@ -312,12 +312,11 @@ def test_index_digest_mismatch_missing_and_extra_files_fail(tmp_path):
         "index reports sha256" in p
         for p in gate.compare_index(manifest, _release_json(manifest, change="f" * 64))
     )
-    assert gate.compare_index(manifest, _release_json(manifest, drop="rag_kit-0.1.0.tar.gz")) == [
-        "index is missing rag_kit-0.1.0.tar.gz"
-    ]
+    dropped = _release_json(manifest, drop="ragkit_dev-0.1.0.tar.gz")
+    assert gate.compare_index(manifest, dropped) == ["index is missing ragkit_dev-0.1.0.tar.gz"]
     assert gate.compare_index(
-        manifest, _release_json(manifest, add="rag_kit-0.1.0-cp311-win_amd64.whl")
-    ) == ["index has an unexpected file rag_kit-0.1.0-cp311-win_amd64.whl"]
+        manifest, _release_json(manifest, add="ragkit_dev-0.1.0-cp311-win_amd64.whl")
+    ) == ["index has an unexpected file ragkit_dev-0.1.0-cp311-win_amd64.whl"]
 
 
 def test_npm_integrity_mismatch_fails(tmp_path):

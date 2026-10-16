@@ -1,4 +1,4 @@
-// The generator installs rag-kit==<its own version>, so the two must match.
+// The generator installs ragkit-dev==<its own version>, so the two must match.
 
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
@@ -8,7 +8,7 @@ import { RAG_KIT_VERSION } from "../lib/version.js";
 
 const pyproject = new URL("../../pyproject.toml", import.meta.url);
 
-test("the generator version is the one it pins rag-kit to", () => {
+test("the generator version is the one it pins ragkit-dev to", () => {
   const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   assert.equal(RAG_KIT_VERSION, pkg.version);
 });

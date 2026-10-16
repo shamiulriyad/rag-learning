@@ -1,4 +1,4 @@
-# Release rag-kit (PyPI) and rag-kit-dev (npm). Run it by hand, from a tag:
+# Release ragkit-dev (PyPI) and rag-kit-dev (npm). Run it by hand, from a tag:
 #   Actions > Release > Run workflow > "Use workflow from": the tag vX.Y.Z
 #
 #   stage = rehearsal  ->  TestPyPI only; the tag must be a pre-release (v0.1.0rc1)
@@ -102,7 +102,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: testpypi
-      url: https://test.pypi.org/project/rag-kit/
+      url: https://test.pypi.org/project/ragkit-dev/
     permissions:
       contents: read
       id-token: write
@@ -138,7 +138,7 @@ jobs:
             check-index --index testpypi --version "$VERSION" --wait 600
 
   e2e-testpypi:
-    name: generator with rag-kit from TestPyPI (${{ matrix.os }})
+    name: generator with ragkit-dev from TestPyPI (${{ matrix.os }})
     needs: [verify, publish-testpypi]
     strategy:
       fail-fast: false
@@ -171,7 +171,7 @@ jobs:
         with:
           name: npm-dist
           path: dist-npm
-      - name: rag-kit only from TestPyPI (dependencies from PyPI); installed files must be this build
+      - name: ragkit-dev only from TestPyPI (dependencies from PyPI); installed files must be this build
         run: |
           python scripts/ci/e2e_generator.py --generator "$(ls dist-npm/*.tgz)" \
             --wheel "$(ls dist/*.whl)" --source testpypi --cases gemini-uv,gemini-pip \
@@ -184,7 +184,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/project/rag-kit/
+      url: https://pypi.org/project/ragkit-dev/
     permissions:
       contents: read
       id-token: write
@@ -219,7 +219,7 @@ jobs:
             check-index --index pypi --version "$VERSION" --wait 600
 
   smoke-pypi:
-    name: generator with rag-kit from PyPI (${{ matrix.os }})
+    name: generator with ragkit-dev from PyPI (${{ matrix.os }})
     needs: [verify, publish-pypi]
     if: needs.verify.outputs.production == 'true'
     strategy:
@@ -340,7 +340,7 @@ jobs:
         with:
           name: python-dist
           path: dist
-      - name: npx rag-kit-dev@version, rag-kit from PyPI; installed files must be this build
+      - name: npx rag-kit-dev@version, ragkit-dev from PyPI; installed files must be this build
         env:
           NPM_VERSION: ${{ needs.verify.outputs.npm-version }}
         run: |

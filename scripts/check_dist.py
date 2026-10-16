@@ -91,7 +91,7 @@ def check_sdist(path: Path, errors: list) -> None:
 
 
 def _check_metadata(label: str, metadata, errors: list) -> None:
-    expected = {"Name": "rag-kit", "Requires-Python": "<3.13,>=3.11",
+    expected = {"Name": "ragkit-dev", "Requires-Python": "<3.13,>=3.11",
                 "License-Expression": "MIT"}
     for field, value in expected.items():
         if metadata.get(field) != value:
@@ -108,7 +108,8 @@ def main(argv) -> int:
         print(__doc__)
         return 2
     folder = Path(argv[1])
-    wheels, sdists = sorted(folder.glob("rag_kit-*.whl")), sorted(folder.glob("rag_kit-*.tar.gz"))
+    wheels = sorted(folder.glob("ragkit_dev-*.whl"))
+    sdists = sorted(folder.glob("ragkit_dev-*.tar.gz"))
     errors = []
     if len(wheels) != 1 or len(sdists) != 1:
         errors.append(f"expected one wheel and one sdist in {folder}, found "

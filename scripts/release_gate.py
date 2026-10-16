@@ -98,7 +98,7 @@ def authorize(stage: str, tag: str, root: Path = ROOT) -> dict:
 
 def expected_names(kind: str, version: str) -> set:
     if kind == "python":
-        return {f"rag_kit-{version}-py3-none-any.whl", f"rag_kit-{version}.tar.gz"}
+        return {f"ragkit_dev-{version}-py3-none-any.whl", f"ragkit_dev-{version}.tar.gz"}
     if kind == "npm":
         return {f"rag-kit-dev-{npm_form(version)}.tgz"}
     raise GateError([f"unknown artifact kind {kind!r}"])
@@ -362,7 +362,7 @@ def main(argv=None) -> int:
             manifest = _manifest_from_env("PYTHON_MANIFEST")
             if manifest.get("version") != args.version:
                 raise GateError([f"manifest is for {manifest.get('version')}, not {args.version}"])
-            url = f"{INDEXES[args.index]}/pypi/rag-kit/{args.version}/json"
+            url = f"{INDEXES[args.index]}/pypi/ragkit-dev/{args.version}/json"
 
             def probe():
                 status, release = fetch_json(url)

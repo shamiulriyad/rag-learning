@@ -44,8 +44,8 @@ rag-kit documents                           # what is indexed
 python example.py data/your-document.pdf "Your question"   # the same from Python
 ```
 
-Optional extras: `pip install "rag-kit[api]=={{RAG_KIT_VERSION}}"` for
-`rag-kit serve` (HTTP API on 127.0.0.1), `pip install "rag-kit[ui]=={{RAG_KIT_VERSION}}"`
+Optional extras: `pip install "ragkit-dev[api]=={{RAG_KIT_VERSION}}"` for
+`rag-kit serve` (HTTP API on 127.0.0.1), `pip install "ragkit-dev[ui]=={{RAG_KIT_VERSION}}"`
 for `rag-kit ui` (Streamlit test UI).
 
 ## Files

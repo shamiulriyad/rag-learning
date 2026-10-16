@@ -2,7 +2,7 @@
 
 Create a [rag-kit](https://github.com/shamiulriyad/rag-learning) project with
 one command: a folder with settings, a document folder and an example, plus a
-`.venv` with rag-kit installed.
+`.venv` with rag-kit installed (the `ragkit-dev` package from PyPI).
 
 ```bash
 npx rag-kit-dev my-rag
@@ -37,7 +37,7 @@ my-rag/
   rag-kit.toml       marks the project folder
   .env.example       settings template - copy it to .env and add your key
   .gitignore         keeps .env, qdrant_data/ and .venv/ out of git
-  requirements.txt   rag-kit[...]==<this generator's version>
+  requirements.txt   ragkit-dev[...]==<this generator's version>
   data/              put your documents here
   example.py         ingest and ask from Python
   README.md          next steps
@@ -61,8 +61,8 @@ rag-kit-dev **never creates `.env` and never asks for an API key**. Copy
 ```
 
 Testing only: `--package-spec SPEC` installs rag-kit from a local wheel or a
-requirement such as `rag-kit==0.1.0rc1`; `--test-pypi` takes rag-kit (and only
-rag-kit) from TestPyPI.
+requirement such as `ragkit-dev==0.1.0rc1`; `--test-pypi` takes ragkit-dev (and
+only ragkit-dev) from TestPyPI.
 
 ## Safety
 

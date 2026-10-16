@@ -1,4 +1,4 @@
-# Continuous integration for rag-kit (Python package) and rag-kit-dev (npm generator).
+# Continuous integration for ragkit-dev (Python package) and rag-kit-dev (npm generator).
 #
 # Safety: no secrets are used anywhere in this workflow; a guard step fails any
 # job that sees GOOGLE_API_KEY. Tests use fakes and never call Gemini (the
