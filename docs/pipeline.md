@@ -1,25 +1,36 @@
 # Pipeline notes
 
-Every step is its own module, in order. [`rag/pipeline.py`](../rag/pipeline.py)
-runs them; `python cli.py ingest` covers steps 1–6 and `python cli.py ask`
-covers steps 7–11.
+Every step is its own module under `src/rag_kit/`, in order.
+[`pipeline.py`](../src/rag_kit/pipeline.py) runs them; `rag-kit ingest` covers
+steps 1–6 and `rag-kit ask` covers steps 7–11.
 
 ```
-1  Input document         ->  rag/step01_load_pdf.py      (.pdf, .txt, .md)
-2  Text extraction        ->  rag/step02_extract_text.py  (+ optional rag/pdf_font_repair.py)
-3  Text cleaning          ->  rag/step03_clean_text.py
-4  Chunking               ->  rag/step04_chunking.py
-5  Embedding              ->  rag/step05_embedding.py
-6  Store in Qdrant        ->  rag/step06_vector_store.py
-7  User question          ->  rag/step07_user_question.py
-8  Query embedding        ->  rag/step08_query_embedding.py
-9  Retrieve chunks        ->  rag/step09_retrieve.py
-10 Gemini                 ->  rag/step10_generate.py
-11 Answer + sources       ->  rag/step11_answer.py
+1  Input document         ->  step01_load_pdf.py      (.pdf, .txt, .md)
+2  Text extraction        ->  step02_extract_text.py  (+ optional pdf_font_repair.py)
+3  Text cleaning          ->  step03_clean_text.py
+4  Chunking               ->  step04_chunking.py
+5  Embedding              ->  step05_embedding.py
+6  Store in Qdrant        ->  step06_vector_store.py
+7  User question          ->  the CLI (cli.py), API (api.py) or UI (ui/app.py)
+8  Query embedding        ->  step08_query_embedding.py
+9  Retrieve chunks        ->  step09_retrieve.py
+10 Gemini                 ->  step10_generate.py
+11 Answer + sources       ->  step11_answer.py
 ```
 
-Expected failures raise subclasses of `rag.errors.RagError` whose messages say
-how to fix the problem; the CLI, API and UI show them as-is.
+Expected failures raise subclasses of `rag_kit.errors.RagError` whose messages
+say how to fix the problem; the CLI, API and UI show them as-is.
+
+Settings live in one immutable `rag_kit.settings.Settings` object. `Pipeline`
+and every step take an optional `settings=`; without it they use
+`rag_kit.settings.default_settings()`, which loads the project found from
+`RAG_PROJECT_DIR` or the nearest `rag-kit.toml`. Loading settings never changes
+`os.environ`; only the CLI, the default API app and the UI export an
+allow-list of `.env` keys (see `rag_kit/env.py`).
+
+Steps report progress with `logging` under the `rag_kit` logger rather than
+printing. The CLI, API and UI turn it on with `rag_kit.log.show_progress()`;
+under `--json` the CLI sends it to stderr so stdout holds only the JSON.
 
 ## Metadata
 
@@ -28,6 +39,11 @@ Each chunk carries `source_file`, `doc_id` (content hash), `file_type`, `page`
 `start_index`. Step 11 cites `source_file` and `page_number`.
 
 ## Notes per step
+
+- **Step 3: headers and footers.** A line that repeats on at least 60 % of the
+  pages (4+ pages, under 80 characters) is treated as a header or footer and
+  blanked where it appears as a whole line. The same words inside body text
+  are kept.
 
 - **Step 2: scanned PDFs do not work.** Extraction warns when a page yields no
   text. Add OCR (pytesseract / ocrmypdf) before step 3 in that case.

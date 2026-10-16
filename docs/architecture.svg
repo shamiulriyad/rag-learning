@@ -11,18 +11,18 @@
 
   <!-- entry points -->
   <rect fill="#eef2f7" stroke="#5b6472" stroke-width="1.2" x="250" y="16" width="120" height="36" rx="6"/>
-  <text fill="#1f2933" x="310" y="39" text-anchor="middle">cli.py</text>
+  <text fill="#1f2933" x="310" y="39" text-anchor="middle">rag-kit CLI</text>
   <rect fill="#eef2f7" stroke="#5b6472" stroke-width="1.2" x="420" y="16" width="120" height="36" rx="6"/>
-  <text fill="#1f2933" x="480" y="34" text-anchor="middle">main.py</text>
+  <text fill="#1f2933" x="480" y="34" text-anchor="middle">api.py</text>
   <text fill="#5b6472" font-size="11" x="480" y="47" text-anchor="middle">FastAPI (optional)</text>
   <rect fill="#eef2f7" stroke="#5b6472" stroke-width="1.2" x="590" y="16" width="120" height="36" rx="6"/>
-  <text fill="#1f2933" x="650" y="34" text-anchor="middle">streamlit_app.py</text>
+  <text fill="#1f2933" x="650" y="34" text-anchor="middle">ui/app.py</text>
   <text fill="#5b6472" font-size="11" x="650" y="47" text-anchor="middle">test UI (optional)</text>
   <path stroke="#5b6472" stroke-width="1.3" fill="none" marker-end="url(#arrow)" d="M310,52 L460,82"/>
   <path stroke="#5b6472" stroke-width="1.3" fill="none" marker-end="url(#arrow)" d="M480,52 L480,82"/>
   <path stroke="#5b6472" stroke-width="1.3" fill="none" marker-end="url(#arrow)" d="M650,52 L500,82"/>
   <rect fill="#ffffff" stroke="#5b6472" stroke-width="1.2" x="400" y="84" width="160" height="32" rx="6"/>
-  <text fill="#1f2933" x="480" y="105" text-anchor="middle">rag/pipeline.py</text>
+  <text fill="#1f2933" x="480" y="105" text-anchor="middle">rag_kit/pipeline.py</text>
 
   <!-- ingest lane -->
   <rect fill="#f7f8fa" stroke="#d5d9e0" stroke-width="1" x="16" y="134" width="740" height="110" rx="8"/>

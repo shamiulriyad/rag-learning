@@ -1,0 +1,30 @@
+# Weekly check of external links in the docs (PyTorch index, Gemini key page,
+# GitHub URLs). Informational only: it is not a required check and never
+# blocks a merge or a release. Repository links are checked in CI instead
+# (scripts/check_readme_links.py), without the network.
+
+name: External links (weekly)
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lychee:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
+        with:
+          args: >-
+            --no-progress --max-retries 3 --exclude-loopback
+            README.md generator/README.md generator/templates/default/README.md
+            docs/pipeline.md CHANGELOG.md RELEASING.md
+          fail: true
+          jobSummary: true

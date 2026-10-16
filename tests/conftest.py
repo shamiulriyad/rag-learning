@@ -1,41 +1,51 @@
 """Unit tests never read the real .env, never touch the real Qdrant store and
 never call an external API. Shared fakes live here."""
 
-import importlib
 import os
 from pathlib import Path
 
 import pytest
 
+from rag_kit.settings import SETTING_NAMES, Settings, set_default_settings
+
 ROOT = Path(__file__).resolve().parents[1]
 EMPTY_ENV = Path(__file__).parent / "fixtures" / "empty_env.txt"
 
-# Settings config.py reads. Cleared so a developer's shell cannot leak into tests.
-CONFIG_VARS = (
-    "GOOGLE_API_KEY", "PDF_PATH", "PDF_FONT_REPAIR", "CHUNK_SIZE", "CHUNK_OVERLAP",
-    "EMBEDDING_PROVIDER", "EMBEDDING_MODEL", "EMBEDDING_DIM", "EMBED_BATCH_SIZE",
-    "EMBED_SLEEP", "QDRANT_URL", "QDRANT_API_KEY", "QDRANT_PATH", "COLLECTION_NAME",
-    "TOP_K", "MIN_SCORE", "LLM_MODEL", "TEMPERATURE",
-)
-for _name in CONFIG_VARS:
+# Cleared so a developer's shell cannot leak into tests.
+for _name in (*SETTING_NAMES, "RAG_PROJECT_DIR", "RAG_EXPORT_ENV"):
     os.environ.pop(_name, None)
-os.environ["RAG_ENV_FILE"] = str(EMPTY_ENV)  # must happen before `import config`
+os.environ["RAG_ENV_FILE"] = str(EMPTY_ENV)  # never the real .env, here or in subprocesses
 os.environ["RAG_API_WARMUP"] = "0"
 
-import config  # noqa: E402
+# The folder above tests/ is the project for code that is not given settings
+# (the checkout has a rag-kit.toml; so does a copied test tree, see README).
+TEST_SETTINGS = Settings.load(ROOT)
+set_default_settings(TEST_SETTINGS)
+
+
+# No test may reach the network. With pytest-socket installed (the dev extra
+# installs it) every test may only connect to this machine; socket creation
+# stays allowed, since asyncio on Windows talks to itself over 127.0.0.1.
+# Subprocesses started by tests are not covered by this guard.
+LOCAL_HOSTS = ["127.0.0.1", "::1", "localhost"]
+
+try:
+    import pytest_socket  # noqa: F401
+except ImportError:
+    pytest_socket = None
+
+
+def pytest_collection_modifyitems(items):
+    if pytest_socket is None:
+        return
+    for item in items:
+        if item.get_closest_marker("allow_hosts") is None:
+            item.add_marker(pytest.mark.allow_hosts(LOCAL_HOSTS))
 
 
 @pytest.fixture
-def load_config(monkeypatch):
-    """Reload config.py with extra environment variables; restored afterwards."""
-    def _load(**env):
-        for key, value in env.items():
-            monkeypatch.setenv(key, value)
-        return importlib.reload(config)
-
-    yield _load
-    monkeypatch.undo()
-    importlib.reload(config)
+def test_settings() -> Settings:
+    return TEST_SETTINGS
 
 
 @pytest.fixture

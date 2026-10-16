@@ -4,10 +4,14 @@ import pytest
 from langchain_core.documents import Document
 from langchain_core.embeddings import DeterministicFakeEmbedding
 
-import config
-from rag.errors import EmptyDocumentError, VectorStoreError
-from rag.step06_vector_store import (delete_document, get_client, list_documents,
-                                     open_vector_store, store_chunks)
+from rag_kit.errors import EmptyDocumentError, VectorStoreError
+from rag_kit.step06_vector_store import (
+    delete_document,
+    get_client,
+    list_documents,
+    open_vector_store,
+    store_chunks,
+)
 
 COLLECTION = "unit_test"
 
@@ -78,19 +82,19 @@ def test_storing_nothing_is_an_error(fake_embeddings, memory_client):
         _store([], fake_embeddings, memory_client)
 
 
-def test_missing_local_store_is_not_created_on_read(tmp_path, monkeypatch):
+def test_missing_local_store_is_not_created_on_read(tmp_path, test_settings):
     missing = tmp_path / "qdrant_data"
-    monkeypatch.setattr(config, "QDRANT_PATH", missing)
+    settings = test_settings.replace(qdrant_path=missing)
     with pytest.raises(VectorStoreError, match="No local Qdrant store"):
-        get_client(create=False)
+        get_client(create=False, settings=settings)
     assert not missing.exists()
 
 
-def test_locked_local_store_has_actionable_error(tmp_path, monkeypatch):
-    monkeypatch.setattr(config, "QDRANT_PATH", tmp_path / "store")
-    first = get_client(create=True)
+def test_locked_local_store_has_actionable_error(tmp_path, test_settings):
+    settings = test_settings.replace(qdrant_path=tmp_path / "store")
+    first = get_client(create=True, settings=settings)
     try:
         with pytest.raises(VectorStoreError, match="in use by another process"):
-            get_client(create=False)
+            get_client(create=False, settings=settings)
     finally:
         first.close()

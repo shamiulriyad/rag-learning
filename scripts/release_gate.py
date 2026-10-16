@@ -1,0 +1,425 @@
+"""Release gates for .github/workflows/release.yml, kept out of shell so they can be tested.
+
+    release_gate.py authorize --stage STAGE --tag TAG          # who may publish what
+    release_gate.py manifest --dist DIR --npm DIR               # trusted build: expected hashes
+    release_gate.py verify-artifacts --kind python|npm --dir DIR --version V
+    release_gate.py check-index --index pypi|testpypi --version V [--wait S]
+    release_gate.py check-npm --version V [--wait S]
+    release_gate.py check-environments --repo OWNER/REPO --environments a,b
+
+Manifests are read from environment variables (PYTHON_MANIFEST, NPM_MANIFEST),
+never interpolated into shell. Outputs for $GITHUB_OUTPUT are written with
+--github-output FILE as key=value lines. Every command exits 1 with the reasons
+on any problem: the release fails closed.
+"""
+
+import argparse
+import base64
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+from packaging.version import InvalidVersion, Version
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from check_versions import ROOT, check, npm_form  # noqa: E402
+
+STAGES = ("rehearsal", "release")
+INDEXES = {"pypi": "https://pypi.org", "testpypi": "https://test.pypi.org"}
+TAG_POLICY = {"name": "v*", "type": "tag"}
+
+
+class GateError(Exception):
+    def __init__(self, problems):
+        super().__init__("; ".join(problems))
+        self.problems = list(problems)
+
+
+# --- authorize: stage, tag and version --------------------------------------------------
+
+
+def parse_release_version(tag: str) -> Version:
+    """The version a tag stands for. Only canonical tags are accepted: v + the PEP 440
+    normal form with three release numbers, optionally aN/bN/rcN, nothing else."""
+    if not tag.startswith("v"):
+        raise GateError([f"tag {tag!r} must start with 'v'"])
+    text = tag[1:]
+    try:
+        version = Version(text)
+    except InvalidVersion:
+        raise GateError([f"tag {tag!r} is not a version"]) from None
+    problems = []
+    if str(version) != text:
+        problems.append(f"tag {tag!r} is not canonical; write it as 'v{version}'")
+    if len(version.release) != 3:
+        problems.append(f"tag {tag!r} needs exactly three release numbers (X.Y.Z)")
+    if version.epoch or version.dev is not None or version.post is not None or version.local:
+        problems.append(f"tag {tag!r}: epochs, .dev, .post and +local versions are not released")
+    if problems:
+        raise GateError(problems)
+    return version
+
+
+def authorize(stage: str, tag: str, root: Path = ROOT) -> dict:
+    """Outputs for the release workflow. production is 'true' only for exactly
+    stage=release with a final version; anything unexpected raises."""
+    if stage not in STAGES:  # exact, case-sensitive: "Release" or " release" are refused
+        raise GateError([f"stage must be exactly one of {', '.join(STAGES)}; got {stage!r}"])
+    version = parse_release_version(tag)
+    problems = []
+    if stage == "rehearsal" and not version.is_prerelease:
+        problems.append(
+            f"stage=rehearsal needs a pre-release tag (e.g. v{version}rc1); "
+            f"{tag} would use up the final version on TestPyPI"
+        )
+    if stage == "release" and version.is_prerelease:
+        problems.append(
+            f"stage=release needs a final version; {tag} is a pre-release (rehearse it instead)"
+        )
+    problems += check(root, tag)  # pyproject == package.json == tag, CHANGELOG section
+    if problems:
+        raise GateError(problems)
+    return {
+        "production": "true" if stage == "release" else "false",
+        "version": str(version),
+        "npm-version": npm_form(str(version)),
+    }
+
+
+# --- artifacts: the trusted build's manifest, checked before and after publishing ----------
+
+
+def expected_names(kind: str, version: str) -> set:
+    if kind == "python":
+        return {f"rag_kit-{version}-py3-none-any.whl", f"rag_kit-{version}.tar.gz"}
+    if kind == "npm":
+        return {f"rag-kit-dev-{npm_form(version)}.tgz"}
+    raise GateError([f"unknown artifact kind {kind!r}"])
+
+
+def digests(path: Path) -> dict:
+    data = path.read_bytes()
+    return {
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "sha512": base64.b64encode(hashlib.sha512(data).digest()).decode(),
+        "size": len(data),
+    }
+
+
+def build_manifest(directory: Path, kind: str, version: str) -> dict:
+    """{"version", "kind", "files": {name: digests}}; the folder must hold exactly the
+    expected files for that version."""
+    present = {p.name for p in directory.iterdir() if p.is_file()}
+    expected = expected_names(kind, version)
+    if present != expected:
+        raise GateError(
+            [f"{directory}: expected exactly {sorted(expected)}, found {sorted(present)}"]
+        )
+    return {
+        "version": version,
+        "kind": kind,
+        "files": {name: digests(directory / name) for name in sorted(expected)},
+    }
+
+
+def verify_artifacts(manifest: dict, directory: Path, kind: str, version: str) -> list:
+    """The downloaded files must be exactly the manifest's, for the authorized version."""
+    problems = []
+    expected = expected_names(kind, version)
+    if manifest.get("kind") != kind or manifest.get("version") != version:
+        problems.append(
+            f"manifest is for {manifest.get('kind')} {manifest.get('version')}, "
+            f"expected {kind} {version}"
+        )
+    listed = set(manifest.get("files", {}))
+    if listed != expected:
+        problems.append(f"manifest lists {sorted(listed)}, expected {sorted(expected)}")
+    present = {p.name for p in directory.iterdir() if p.is_file()} if directory.is_dir() else set()
+    for name in sorted(expected - present):
+        problems.append(f"missing artifact: {name}")
+    for name in sorted(present - expected):
+        problems.append(f"unexpected artifact: {name}")
+    for name in sorted(expected & present & listed):
+        actual = hashlib.sha256((directory / name).read_bytes()).hexdigest()
+        if actual != manifest["files"][name]["sha256"]:
+            problems.append(
+                f"{name}: sha256 {actual} does not match the build's "
+                f"{manifest['files'][name]['sha256']}"
+            )
+    return problems
+
+
+def compare_index(manifest: dict, release_json: dict) -> list:
+    """PyPI's JSON API for one release vs the manifest: same files, same sha256."""
+    reported = {u["filename"]: u["digests"]["sha256"] for u in release_json.get("urls", [])}
+    expected = {name: d["sha256"] for name, d in manifest["files"].items()}
+    problems = [f"index is missing {name}" for name in sorted(set(expected) - set(reported))]
+    problems += [
+        f"index has an unexpected file {name}" for name in sorted(set(reported) - set(expected))
+    ]
+    problems += [
+        f"{name}: index reports sha256 {reported[name]}, build has {expected[name]}"
+        for name in sorted(set(expected) & set(reported))
+        if reported[name] != expected[name]
+    ]
+    return problems
+
+
+def compare_npm(manifest: dict, integrity: str) -> list:
+    if len(manifest.get("files", {})) != 1:
+        return [
+            f"npm manifest must list exactly one tarball, lists {sorted(manifest.get('files', {}))}"
+        ]
+    [(name, d)] = manifest["files"].items()
+    expected = f"sha512-{d['sha512']}"
+    return (
+        []
+        if integrity.strip() == expected
+        else [
+            f"npm reports integrity {integrity.strip()!r} for the published package, the build's "
+            f"{name} is {expected!r}"
+        ]
+    )
+
+
+def fetch_json(url: str, token: str = None):
+    """(status, parsed JSON or None)."""
+    request = urllib.request.Request(url, headers={"Accept": "application/json"})
+    if token:
+        request.add_header("Authorization", f"Bearer {token}")
+        request.add_header("Accept", "application/vnd.github+json")
+        request.add_header("X-GitHub-Api-Version", "2022-11-28")
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return response.status, json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        return exc.code, None
+
+
+def wait_for(probe, wait: float, interval: float = 20):
+    """Calls probe() -> (done, problems) until done or the time is up."""
+    deadline = time.monotonic() + wait
+    while True:
+        done, problems = probe()
+        if done or time.monotonic() >= deadline:
+            return problems
+        time.sleep(interval)
+
+
+# --- environments: protection must be configured, not assumed ---------------------------
+
+
+def evaluate_environment(name: str, environment, policies) -> list:
+    """environment / policies: GitHub API JSON for the environment and its deployment
+    branch policies (None when the API returned 404)."""
+    if environment is None:
+        return [f"environment {name!r} does not exist (GitHub would create it unprotected)"]
+    problems = []
+    rules = environment.get("protection_rules") or []
+    reviewers = [
+        r
+        for rule in rules
+        if rule.get("type") == "required_reviewers"
+        for r in rule.get("reviewers") or []
+    ]
+    if not reviewers:
+        problems.append(f"environment {name!r} has no required reviewers")
+    if environment.get("can_admins_bypass", True):
+        problems.append(f"environment {name!r} lets administrators bypass its protection rules")
+    policy = environment.get("deployment_branch_policy") or {}
+    if not (policy.get("custom_branch_policies") and not policy.get("protected_branches")):
+        problems.append(f"environment {name!r} must allow deployments only from selected tags")
+    else:
+        listed = [
+            {"name": p.get("name"), "type": p.get("type", "branch")}
+            for p in (policies or {}).get("branch_policies", [])
+        ]
+        if listed != [TAG_POLICY]:
+            problems.append(
+                f"environment {name!r} deployment policies are {listed}, expected "
+                f"only {[TAG_POLICY]}"
+            )
+    return problems
+
+
+def check_environments(repo: str, names: list, token: str) -> list:
+    problems = []
+    api = f"https://api.github.com/repos/{repo}/environments"
+    for name in names:
+        status, environment = fetch_json(f"{api}/{name}", token)
+        if status == 404:
+            problems += evaluate_environment(name, None, None)
+            continue
+        if status != 200:
+            problems.append(
+                f"cannot read environment {name!r} (HTTP {status}): give the job "
+                "'actions: read' or check the token; refusing to publish unverified"
+            )
+            continue
+        policies = None
+        if (environment.get("deployment_branch_policy") or {}).get("custom_branch_policies"):
+            status, policies = fetch_json(f"{api}/{name}/deployment-branch-policies", token)
+            if status != 200:
+                problems.append(f"cannot read deployment policies of {name!r} (HTTP {status})")
+                continue
+        problems += evaluate_environment(name, environment, policies)
+    return problems
+
+
+# --- command line -----------------------------------------------------------------------
+
+
+def _write_outputs(path, values: dict) -> None:
+    lines = "".join(f"{key}={value}\n" for key, value in values.items())
+    if path:
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write(lines)
+    print(lines, end="")
+
+
+def _manifest_from_env(variable: str) -> dict:
+    raw = os.environ.get(variable)
+    if not raw:
+        raise GateError([f"${variable} is empty: the trusted build's manifest did not arrive"])
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise GateError([f"${variable} is not valid JSON: {exc}"]) from None
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--root", type=Path, default=ROOT, help=argparse.SUPPRESS)
+    parser.add_argument("--github-output", default=None)
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p = sub.add_parser("authorize")
+    p.add_argument("--stage", required=True)
+    p.add_argument("--tag", required=True)
+
+    p = sub.add_parser("manifest")
+    p.add_argument("--dist", type=Path, required=True)
+    p.add_argument("--npm", type=Path, required=True)
+
+    p = sub.add_parser("verify-artifacts")
+    p.add_argument("--kind", choices=["python", "npm"], required=True)
+    p.add_argument("--dir", type=Path, required=True)
+    p.add_argument("--version", required=True)
+
+    p = sub.add_parser("check-index")
+    p.add_argument("--index", choices=sorted(INDEXES), required=True)
+    p.add_argument("--version", required=True)
+    p.add_argument("--wait", type=float, default=0)
+
+    p = sub.add_parser("check-npm")
+    p.add_argument("--version", required=True)
+    p.add_argument("--wait", type=float, default=0)
+
+    p = sub.add_parser("check-environments")
+    p.add_argument("--repo", required=True)
+    p.add_argument("--environments", required=True)
+
+    args = parser.parse_args(argv)
+    try:
+        if args.command == "authorize":
+            _write_outputs(args.github_output, authorize(args.stage, args.tag, args.root))
+            return 0
+
+        if args.command == "manifest":
+            import tomllib
+
+            version = tomllib.loads((args.root / "pyproject.toml").read_text(encoding="utf-8"))
+            version = version["project"]["version"]
+            python = build_manifest(args.dist, "python", version)
+            npm = build_manifest(args.npm, "npm", version)
+            _write_outputs(
+                args.github_output,
+                {
+                    "python-manifest": json.dumps(python, separators=(",", ":"), sort_keys=True),
+                    "npm-manifest": json.dumps(npm, separators=(",", ":"), sort_keys=True),
+                },
+            )
+            return 0
+
+        if args.command == "verify-artifacts":
+            variable = "PYTHON_MANIFEST" if args.kind == "python" else "NPM_MANIFEST"
+            problems = verify_artifacts(
+                _manifest_from_env(variable), args.dir, args.kind, args.version
+            )
+            if problems:
+                raise GateError(problems)
+            print(f"{args.kind} artifacts are exactly the trusted build's ({args.version}).")
+            return 0
+
+        if args.command == "check-index":
+            manifest = _manifest_from_env("PYTHON_MANIFEST")
+            if manifest.get("version") != args.version:
+                raise GateError([f"manifest is for {manifest.get('version')}, not {args.version}"])
+            url = f"{INDEXES[args.index]}/pypi/rag-kit/{args.version}/json"
+
+            def probe():
+                status, release = fetch_json(url)
+                if status != 200:
+                    return False, [f"{url} answered HTTP {status}"]
+                problems = compare_index(manifest, release)
+                # A file still missing may just be propagating; a wrong hash never is.
+                return not any("missing" in p for p in problems) or any(
+                    "sha256" in p or "unexpected" in p for p in problems
+                ), problems
+
+            problems = wait_for(probe, args.wait)
+            if problems:
+                raise GateError(problems)
+            print(f"{args.index} serves exactly the trusted build's files for {args.version}.")
+            return 0
+
+        if args.command == "check-npm":
+            manifest = _manifest_from_env("NPM_MANIFEST")
+            spec = f"rag-kit-dev@{npm_form(args.version)}"
+
+            def probe():
+                npm = shutil.which("npm")
+                if not npm:
+                    return True, ["npm is not on PATH"]
+                result = subprocess.run(
+                    [npm, "view", spec, "dist.integrity"], capture_output=True, text=True
+                )
+                if result.returncode != 0 or not result.stdout.strip():
+                    return False, [f"npm does not serve {spec} yet"]
+                return True, compare_npm(manifest, result.stdout)
+
+            problems = wait_for(probe, args.wait)
+            if problems:
+                raise GateError(problems)
+            print(f"npm serves exactly the trusted build's tarball for {spec}.")
+            return 0
+
+        if args.command == "check-environments":
+            token = os.environ.get("GH_TOKEN", "")
+            if not token:
+                raise GateError(["GH_TOKEN is not set: cannot verify environment protection"])
+            names = [n for n in args.environments.split(",") if n]
+            problems = check_environments(args.repo, names, token)
+            if problems:
+                raise GateError(problems)
+            print(
+                f"environments {', '.join(names)}: required reviewers, no admin bypass, "
+                f"deployments only from tags {TAG_POLICY['name']}."
+            )
+            return 0
+    except GateError as error:
+        for problem in error.problems:
+            print(f"FAIL {problem}", file=sys.stderr)
+        return 1
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

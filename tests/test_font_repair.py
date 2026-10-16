@@ -2,8 +2,14 @@
 
 import pytest
 
-from rag.pdf_font_repair import (BODY_FONT, BODY_MAP, BOLD_FONT, BOLD_MAP, is_readable,
-                                 repair_page)
+from rag_kit.pdf_font_repair import (
+    BODY_FONT,
+    BODY_MAP,
+    BOLD_FONT,
+    BOLD_MAP,
+    is_readable,
+    repair_page,
+)
 from tests.conftest import ROOT
 
 GRAMMAR_PDF = ROOT / "-Free-English-Grammar.pdf"

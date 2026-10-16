@@ -1,0 +1,12 @@
+# Weekly update PRs for the pinned GitHub Actions (SHA pins) and the Python
+# dependency ranges in pyproject.toml. The npm generator has no dependencies.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly

@@ -3,11 +3,11 @@
 import pytest
 from langchain_core.documents import Document
 
-from rag.errors import ExtractionError, UnsupportedFileError
-from rag.step01_load_pdf import load_document
-from rag.step02_extract_text import extract_text
-from rag.step03_clean_text import clean_documents, clean_text
-from rag.step04_chunking import chunk_documents
+from rag_kit.errors import ExtractionError, UnsupportedFileError
+from rag_kit.step01_load_pdf import load_document
+from rag_kit.step02_extract_text import extract_text
+from rag_kit.step03_clean_text import clean_documents, clean_text
+from rag_kit.step04_chunking import chunk_documents
 
 # --- step 1 -------------------------------------------------------------------
 
@@ -58,7 +58,7 @@ def test_extract_pdf_keeps_page_numbers_and_metadata(tmp_path):
 
 
 def test_font_repair_is_off_by_default_and_used_only_when_asked(tmp_path, monkeypatch):
-    import rag.step02_extract_text as step02
+    import rag_kit.step02_extract_text as step02
     calls = []
     monkeypatch.setattr(step02, "repair_page", lambda page: calls.append(page) or "repaired text")
     pdf = _make_pdf(tmp_path / "x.pdf", ["Plain text page."])
@@ -112,6 +112,33 @@ def test_clean_documents_drops_headers_and_blank_pages():
 
     assert [d.metadata["page_number"] for d in cleaned] == [1, 2, 3, 4]
     assert all("BOOK HEADER" not in d.page_content for d in cleaned)
+
+
+def test_clean_documents_keeps_header_words_inside_body_text():
+    # Regression: a repeated header line was removed with str.replace, which also
+    # cut the same word out of every sentence that contained it.
+    docs = [Document(page_content=f"Chapter\nThe Chapter on nouns explains page {i} content "
+                                  "in detail, enough text to keep.", metadata={"page_number": i})
+            for i in range(1, 6)]
+
+    cleaned = clean_documents(docs)
+
+    assert [d.page_content for d in cleaned] == [
+        f"The Chapter on nouns explains page {i} content in detail, enough text to keep."
+        for i in range(1, 6)
+    ]
+
+
+def test_clean_documents_does_not_modify_its_input():
+    original = "HEADER\n" + "Real content about grammar that is long enough to keep. " * 2
+    docs = [Document(page_content=original, metadata={"page_number": i}) for i in range(1, 5)]
+
+    cleaned = clean_documents(docs)
+
+    assert all(d.page_content == original for d in docs)
+    assert all("HEADER" not in d.page_content for d in cleaned)
+    assert cleaned[0].metadata == {"page_number": 1}
+    assert cleaned[0].metadata is not docs[0].metadata
 
 
 # --- step 4 -------------------------------------------------------------------
