@@ -1,17 +1,25 @@
-"""End-to-end test of the packed rag-kit-dev generator with a locally built wheel.
+"""End-to-end test of the rag-kit-dev generator.
 
-    python scripts/ci/e2e_generator.py --tarball rag-kit-dev-0.1.0.tgz \
-        --wheel rag_kit-0.1.0-py3-none-any.whl --work <empty dir> [--python PATH] \
+    python scripts/ci/e2e_generator.py --generator rag-kit-dev-0.1.0.tgz \
+        --wheel rag_kit-0.1.0-py3-none-any.whl --work <empty dir> \
+        [--source wheel|testpypi|pypi] [--python PATH] \
         [--cases gemini-uv,gemini-pip,no-install,failure,refusals,local]
 
-Runs `npx --package=<tarball> rag-kit-dev ...` like a user would, in a scrubbed
-environment: no rag-kit settings or API keys, HF_HOME inside --work, and
-HF_HUB_OFFLINE=1, so nothing can download a model. No case ingests or asks,
-and no API key is ever used. Exits 1 on the first failed expectation.
+--generator is the packed tarball (CI, release rehearsal) or an npm spec such
+as rag-kit-dev@0.1.0 (after publishing). --source says where the generated
+project gets rag-kit: the local --wheel (--package-spec), TestPyPI
+(--test-pypi), or PyPI (no option, as a user would). In every mode the
+installed rag-kit must be exactly the files of --wheel, so a release check
+proves the package came from the build under test.
+
+Everything runs in a scrubbed environment: no rag-kit settings or API keys,
+HF_HOME inside --work and HF_HUB_OFFLINE=1, so nothing can download a model.
+No case ingests or asks. Exits 1 on the first failed expectation.
 """
 
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -42,6 +50,7 @@ SCRUBBED = (
     "PYTHONPATH",
     "VIRTUAL_ENV",
 )
+HERE = Path(__file__).resolve().parent
 
 
 class Failed(Exception):
@@ -56,12 +65,24 @@ def expect(condition, message, output=""):
     print(f"  ok  {message}")
 
 
+def pep440(version):
+    """npm's 0.1.0-rc.1 -> 0.1.0rc1; final versions are unchanged."""
+    labels = {"alpha": "a", "beta": "b", "rc": "rc"}
+    return re.sub(
+        r"-(alpha|beta|rc)\.?(\d+)$", lambda m: f"{labels[m.group(1)]}{m.group(2)}", version
+    )
+
+
 class Runner:
     def __init__(self, args):
         self.work = args.work.resolve()
-        self.tarball = args.tarball.resolve()
         self.wheel = args.wheel.resolve()
+        self.source = args.source
         self.python = args.python
+        generator = Path(args.generator)
+        self.generator = str(generator.resolve()) if generator.exists() else args.generator
+        # rag_kit-0.1.0rc1-py3-none-any.whl -> 0.1.0rc1
+        self.version = self.wheel.name.split("-")[1]
         self.hf_home = self.work / "hf-home"
         self.npx = shutil.which("npx")
         if not self.npx:
@@ -74,10 +95,6 @@ class Runner:
             PYTHONIOENCODING="utf-8",
             PYTHONDONTWRITEBYTECODE="1",
         )
-
-    @property
-    def version(self):
-        return self.tarball.name.removeprefix("rag-kit-dev-").removesuffix(".tgz")
 
     def run(self, args, cwd, env=None):
         result = subprocess.run(
@@ -94,9 +111,16 @@ class Runner:
         return result.returncode, result.stdout + result.stderr
 
     def generate(self, *args):
-        extra = ["--python", self.python] if self.python and "--no-install" not in args else []
+        installing = "--no-install" not in args
+        extra = []
+        if installing and self.python:
+            extra += ["--python", self.python]
+        if installing and self.source == "wheel" and "--package-spec" not in args:
+            extra += ["--package-spec", str(self.wheel)]
+        if installing and self.source == "testpypi":
+            extra += ["--test-pypi"]
         return self.run(
-            [self.npx, "--yes", f"--package={self.tarball}", "rag-kit-dev", *args, *extra],
+            [self.npx, "--yes", f"--package={self.generator}", "rag-kit-dev", *args, *extra],
             cwd=self.work,
         )
 
@@ -117,16 +141,33 @@ class Runner:
         expect(not (project / ".env").exists(), f"{name}: no .env")
         env_example = (project / ".env.example").read_text(encoding="utf-8")
         expect("\nGOOGLE_API_KEY=\n" in env_example, f"{name}: .env.example key is empty")
-        requirement = [
+        pins = [
             line
             for line in (project / "requirements.txt").read_text().splitlines()
             if line and not line.startswith("#")
         ]
+        match = re.fullmatch(r"rag-kit\[([a-z,]+)\]==(.+)", pins[0]) if len(pins) == 1 else None
         expect(
-            requirement == [f"rag-kit[{extras}]=={self.version}"],
-            f"{name}: requirements.txt pins {requirement}",
+            match is not None
+            and match.group(1) == extras
+            and pep440(match.group(2)) == self.version,
+            f"{name}: requirements.txt pins {pins}",
         )
 
+        code, out = self.run(
+            [
+                self.tool(project, "python"),
+                str(HERE / "check_wheel_install.py"),
+                "--wheel",
+                str(self.wheel),
+            ],
+            cwd=project,
+        )
+        expect(
+            code == 0,
+            f"{name}: installed rag-kit is exactly {self.wheel.name} ({self.source})",
+            out,
+        )
         code, out = self.run([self.tool(project, "rag-kit"), "--help"], cwd=project)
         expect(code == 0, f"{name}: rag-kit --help", out)
         code, out = self.run([self.tool(project, "rag-kit"), "check"], cwd=project)
@@ -164,16 +205,12 @@ class Runner:
 
     # --- cases -------------------------------------------------------------------
     def gemini_uv(self):
-        code, out = self.generate(
-            "my-rag", "--embeddings", "gemini", "--package-spec", str(self.wheel)
-        )
+        code, out = self.generate("my-rag", "--embeddings", "gemini")
         expect(code == 0 and "Installer: uv" in out, "gemini + uv: generator exit 0", out)
         self.check_installed_project(self.work / "my-rag", "gemini")
 
     def gemini_pip(self):
-        code, out = self.generate(
-            "my-rag-pip", "--embeddings", "gemini", "--no-uv", "--package-spec", str(self.wheel)
-        )
+        code, out = self.generate("my-rag-pip", "--embeddings", "gemini", "--no-uv")
         expect(code == 0 and "Installer: pip" in out, "gemini + pip: generator exit 0", out)
         self.check_installed_project(self.work / "my-rag-pip", "gemini")
 
@@ -227,14 +264,13 @@ class Runner:
         )
 
     def local(self):
-        code, out = self.generate(
-            "my-rag-local", "--embeddings", "local", "--package-spec", str(self.wheel)
-        )
+        code, out = self.generate("my-rag-local", "--embeddings", "local")
         expect(code == 0, "local + uv: generator exit 0", out)
         project = self.work / "my-rag-local"
         self.check_installed_project(project, "local,gemini")
-        check_cpu = Path(__file__).with_name("check_cpu_torch.py")
-        code, out = self.run([self.tool(project, "python"), str(check_cpu)], cwd=project)
+        code, out = self.run(
+            [self.tool(project, "python"), str(HERE / "check_cpu_torch.py")], cwd=project
+        )
         print("     " + out.strip().replace("\n", "\n     "))
         if sys.platform.startswith("linux"):
             expect(code == 0, "local: CPU-only PyTorch (Linux installs from the CPU index)", out)
@@ -246,9 +282,10 @@ class Runner:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--tarball", type=Path, required=True)
-    parser.add_argument("--wheel", type=Path, required=True)
+    parser.add_argument("--generator", required=True, help="packed tarball or npm spec")
+    parser.add_argument("--wheel", type=Path, required=True, help="the rag-kit build under test")
     parser.add_argument("--work", type=Path, required=True)
+    parser.add_argument("--source", choices=["wheel", "testpypi", "pypi"], default="wheel")
     parser.add_argument("--python", help="interpreter passed to the generator as --python")
     parser.add_argument("--cases", default=",".join(DEFAULT_CASES))
     args = parser.parse_args(argv)
@@ -262,7 +299,7 @@ def main(argv=None) -> int:
         for case in args.cases.split(","):
             if case not in ALL_CASES:
                 raise Failed(f"unknown case {case!r}")
-            print(f"\n### {case}")
+            print(f"\n### {case} (rag-kit from {args.source})")
             getattr(runner, case.replace("-", "_"))()
     except Failed as failure:
         print(f"FAIL {failure}")
