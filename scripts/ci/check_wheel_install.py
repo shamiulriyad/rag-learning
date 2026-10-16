@@ -2,7 +2,12 @@
 
 Run it with the Python of the environment to check:
 
+    uv pip install --link-mode copy --python .venv/bin/python <wheel>
     .venv/bin/python scripts/ci/check_wheel_install.py
+
+Install with --link-mode copy: uv's default hardlinks installed files to its
+cache, so they would not be this environment's own files (and writing to one
+would change the cache and every other environment linked to it).
 
 Uses the installer's RECORD file (every installed file with its sha256):
   * each recorded file must still exist and match its hash, so a modified
