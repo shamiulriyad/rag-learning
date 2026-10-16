@@ -16,6 +16,24 @@ test UI.
 > below). Upgrading from the script-based version? See
 > [CHANGELOG.md](https://github.com/shamiulriyad/rag-learning/blob/main/CHANGELOG.md) for the old-to-new command table.
 
+## Start a new project
+
+`rag-kit-dev`, the npm package in [`generator/`](https://github.com/shamiulriyad/rag-learning/tree/main/generator),
+creates a project folder (settings template, `data/`, an example) and a `.venv`
+with rag-kit installed. It explains the local-vs-Gemini embedding choice before
+installing anything and never creates `.env` or asks for an API key.
+
+```bash
+npx rag-kit-dev my-rag                     # once rag-kit-dev and rag-kit are published
+```
+
+Until then, run it from a checkout against a locally built wheel (testing only):
+
+```bash
+uv build --out-dir dist
+node generator/bin/rag-kit-dev.js my-rag --embeddings gemini --package-spec dist/rag_kit-0.1.0-py3-none-any.whl
+```
+
 ## What it does
 
 | Step | Module | Notes |

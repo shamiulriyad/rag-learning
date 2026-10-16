@@ -59,6 +59,15 @@ metadata keys, the `[S1]` source markers, the `/health`, `/query` and
 `documents --json` schemas, and the 4000-character question limit. Existing
 Qdrant collections need no migration.
 
+### Project generator
+
+- New npm package `rag-kit-dev` (in `generator/`, version-locked to rag-kit):
+  `npx rag-kit-dev my-rag` creates a project with `rag-kit.toml`,
+  `.env.example`, `.gitignore`, `requirements.txt`, `data/`, `example.py` and
+  a README, and installs rag-kit into `.venv` with uv or pip. It never creates
+  `.env`, asks for API keys, downloads the embedding model, overwrites files or
+  deletes anything.
+
 ### Earlier fixes in this release
 
 - Header/footer removal no longer deletes matching words from body text.
