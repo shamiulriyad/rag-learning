@@ -84,15 +84,17 @@ only-include = [
     "CHANGELOG.md",
     "pyproject.toml",
 ]
-# Hatchling always adds the project .gitignore to an sdist (it cannot be
-# excluded). Build releases from a clean export of a commit (see
-# scripts/check_dist.py) so it is the committed file, never local edits.
 exclude = [
     "**/__pycache__",
     "**/*.py[cod]",
     "**/*.pdf",
     "**/.env",
 ]
+
+# Hatchling always force-adds the project .gitignore to an sdist, and `exclude`
+# cannot remove it; hatch_build.py drops it (the file lists personal entries).
+[tool.hatch.build.targets.sdist.hooks.custom]
+path = "hatch_build.py"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

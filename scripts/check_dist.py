@@ -1,11 +1,11 @@
 """Check the contents of built rag-kit distributions before anyone installs them.
 
-Build from a clean export of a commit, not from the working tree, so no
-uncommitted file or edit can end up in a distribution:
+Build from a clean checkout or export of a commit, not from a working tree
+with uncommitted files (CI checkouts are clean):
 
     git archive --format=tar HEAD | tar -x -C <export>      # an empty folder
     uv build <export> --out-dir <dir>                       # or python -m build
-    python scripts/check_dist.py <dir> [--gitignore <export>/.gitignore]
+    python scripts/check_dist.py <dir>
 
 Fails (exit 1) if a wheel or sdist contains anything outside the allow-list,
 any user data (PDFs, .env files, Qdrant stores, uploads, data/), bytecode, or
@@ -32,7 +32,13 @@ FORBIDDEN = [
     (re.compile(r"(^|/)__pycache__(/|$)|\.py[cod]$"), "bytecode"),
     (re.compile(r"(^|/)\.git(/|$)|(^|/)\.venv(/|$)"), "repository/venv files"),
     (re.compile(r"(^|/)fix\d*\.txt$|(^|/)(work|portfolio|linkdin)\.txt$"), "personal notes"),
+    # Hatchling force-adds .gitignore to sdists; hatch_build.py removes it.
+    (re.compile(r"(^|/)\.gitignore$"), "VCS ignore file"),
 ]
+
+# Everything an sdist may contain besides src/rag_kit/ and tests/.
+SDIST_FILES = {"PKG-INFO", "pyproject.toml", "README.md", "LICENSE", "CHANGELOG.md",
+               "hatch_build.py"}
 
 
 def forbidden(names):
@@ -63,31 +69,18 @@ def check_wheel(path: Path, errors: list) -> None:
           f"({sum(n.startswith('rag_kit/') for n in names)} in rag_kit/)")
 
 
-def check_sdist(path: Path, errors: list, gitignore: Path = None) -> None:
+def check_sdist(path: Path, errors: list) -> None:
     with tarfile.open(path) as sdist:
         names = [m.name for m in sdist.getmembers() if m.isfile()]
         root = PurePosixPath(names[0]).parts[0]
         metadata = Parser().parsestr(sdist.extractfile(f"{root}/PKG-INFO").read().decode())
-        packed_gitignore = (sdist.extractfile(f"{root}/.gitignore").read()
-                            if f"{root}/.gitignore" in names else None)
-    if packed_gitignore is not None:
-        if gitignore is None:
-            errors.append(f"{path.name}: contains .gitignore; pass --gitignore with the "
-                          "committed file to confirm it has no local edits")
-        # Compare text, not bytes: git archive may convert line endings (autocrlf).
-        elif _lines(packed_gitignore) != _lines(gitignore.read_bytes()):
-            errors.append(f"{path.name}: .gitignore differs from {gitignore} "
-                          "(built from a working tree with local edits?)")
 
     relative = [str(PurePosixPath(*PurePosixPath(n).parts[1:])) for n in names]
-    # .gitignore: Hatchling always adds it; it must be the committed one (see main()).
-    allowed_files = {"README.md", "LICENSE", "CHANGELOG.md", "pyproject.toml", "PKG-INFO",
-                     ".gitignore"}
     outside = [n for n in relative
-               if n not in allowed_files and not n.startswith(("src/rag_kit/", "tests/"))]
+               if n not in SDIST_FILES and not n.startswith(("src/rag_kit/", "tests/"))]
     errors += [f"{path.name}: outside the allow-list: {n}" for n in outside]
     errors += [f"{path.name}: {item}" for item in forbidden(relative)]
-    for required in ("pyproject.toml", "README.md", "LICENSE", "CHANGELOG.md",
+    for required in ("pyproject.toml", "README.md", "LICENSE", "CHANGELOG.md", "hatch_build.py",
                      "src/rag_kit/__init__.py", "src/rag_kit/ui/app.py",
                      "tests/conftest.py", "tests/fixtures/empty_env.txt"):
         if required not in relative:
@@ -95,10 +88,6 @@ def check_sdist(path: Path, errors: list, gitignore: Path = None) -> None:
     _check_metadata(path.name, metadata, errors)
     print(f"sdist  {path.name}: {len(names)} files "
           f"({sum(n.startswith('tests/') for n in relative)} in tests/)")
-
-
-def _lines(data: bytes) -> list:
-    return data.replace(b"\r\n", b"\n").split(b"\n")
 
 
 def _check_metadata(label: str, metadata, errors: list) -> None:
@@ -115,10 +104,6 @@ def _check_metadata(label: str, metadata, errors: list) -> None:
 
 
 def main(argv) -> int:
-    gitignore = None
-    if len(argv) == 4 and argv[2] == "--gitignore":
-        gitignore = Path(argv[3])
-        argv = argv[:2]
     if len(argv) != 2:
         print(__doc__)
         return 2
@@ -131,7 +116,7 @@ def main(argv) -> int:
     for wheel in wheels:
         check_wheel(wheel, errors)
     for sdist in sdists:
-        check_sdist(sdist, errors, gitignore)
+        check_sdist(sdist, errors)
     for error in errors:
         print(f"FAIL {error}")
     print("All distribution checks passed." if not errors else f"{len(errors)} problem(s).")
