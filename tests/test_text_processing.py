@@ -114,6 +114,33 @@ def test_clean_documents_drops_headers_and_blank_pages():
     assert all("BOOK HEADER" not in d.page_content for d in cleaned)
 
 
+def test_clean_documents_keeps_header_words_inside_body_text():
+    # Regression: a repeated header line was removed with str.replace, which also
+    # cut the same word out of every sentence that contained it.
+    docs = [Document(page_content=f"Chapter\nThe Chapter on nouns explains page {i} content "
+                                  "in detail, enough text to keep.", metadata={"page_number": i})
+            for i in range(1, 6)]
+
+    cleaned = clean_documents(docs)
+
+    assert [d.page_content for d in cleaned] == [
+        f"The Chapter on nouns explains page {i} content in detail, enough text to keep."
+        for i in range(1, 6)
+    ]
+
+
+def test_clean_documents_does_not_modify_its_input():
+    original = "HEADER\n" + "Real content about grammar that is long enough to keep. " * 2
+    docs = [Document(page_content=original, metadata={"page_number": i}) for i in range(1, 5)]
+
+    cleaned = clean_documents(docs)
+
+    assert all(d.page_content == original for d in docs)
+    assert all("HEADER" not in d.page_content for d in cleaned)
+    assert cleaned[0].metadata == {"page_number": 1}
+    assert cleaned[0].metadata is not docs[0].metadata
+
+
 # --- step 4 -------------------------------------------------------------------
 
 

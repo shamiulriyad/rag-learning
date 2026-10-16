@@ -46,21 +46,26 @@ def _find_repeating_lines(docs: List[Document], threshold: float = 0.6) -> set:
     return {line for line, count in counter.items() if count >= cutoff}
 
 
+def _drop_lines(text: str, boilerplate: set) -> str:
+    """Blank out whole lines that are boilerplate. Matching whole lines (not
+    substrings) keeps a short header like "Chapter" from being cut out of the
+    sentences that happen to contain it."""
+    if not boilerplate:
+        return text
+    return "\n".join("" if line.strip() in boilerplate else line for line in text.split("\n"))
+
+
 def clean_documents(docs: List[Document], min_chars: int = 50) -> List[Document]:
+    """Return cleaned copies; the input Documents are left untouched."""
     boilerplate = _find_repeating_lines(docs)
 
     cleaned: List[Document] = []
     for doc in docs:
-        body = doc.page_content
-        for line in boilerplate:
-            body = body.replace(line, "")
-
-        body = clean_text(body)
+        body = clean_text(_drop_lines(doc.page_content, boilerplate))
         if len(body) < min_chars:      # blank or near-blank page
             continue
 
-        doc.page_content = body
-        cleaned.append(doc)
+        cleaned.append(Document(id=doc.id, page_content=body, metadata=dict(doc.metadata)))
 
     dropped = len(docs) - len(cleaned)
     print(f"[3] Cleaned    : {len(cleaned)} pages kept, {dropped} dropped, "
