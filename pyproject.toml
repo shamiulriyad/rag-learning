@@ -84,6 +84,9 @@ only-include = [
     "CHANGELOG.md",
     "pyproject.toml",
 ]
+# Hatchling always adds the project .gitignore to an sdist (it cannot be
+# excluded). Build releases from a clean export of a commit (see
+# scripts/check_dist.py) so it is the committed file, never local edits.
 exclude = [
     "**/__pycache__",
     "**/*.py[cod]",
