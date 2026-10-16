@@ -105,6 +105,9 @@ python cli.py ingest scanned-font.pdf --font-repair on
   (stable schema; files sorted by name).
 - **Start over:** `python cli.py ingest file.pdf --recreate` drops the whole
   collection first. Needed after changing the embedding model.
+- **File names starting with `-`** look like options to the CLI. Write
+  `./-name.pdf`, or put `--` before the files:
+  `python cli.py ingest --font-repair on -- -Free-English-Grammar.pdf`.
 
 `python ingest.py …` still works as a shortcut (including the old `--pdf` flag).
 
@@ -150,7 +153,12 @@ and `.env` is never modified.
   `{"answer": "...", "status": "answered" | "no_results", "sources": [{"page", "source", "score", "marker", "chunk_id", "text"}]}`
 
 `answer` has the markers stripped; `marker` on each source maps them back.
-Pipeline failures return 503 with the reason.
+Pipeline failures return 503 with the reason. Questions longer than 4000
+characters are rejected with 422.
+
+The service has no authentication and binds to `127.0.0.1` by default; do not
+expose it publicly. To embed it elsewhere, build your own instance with
+`main.create_app(settings=..., pipeline=...)`.
 
 ## Optional Streamlit test UI
 
@@ -176,6 +184,21 @@ for source in result.sources:
     print(source["marker"], source["file"], source["page"], source["score"])
 pipeline.close()
 ```
+
+Settings come from the `.env` next to `config.py` by default. To use another
+project folder or override values, pass them explicitly:
+
+```python
+from rag.settings import Settings
+
+settings = Settings.load("path/to/project")            # reads path/to/project/.env
+pipeline = Pipeline(settings=settings.replace(top_k=8))
+```
+
+`Settings.load` does not change `os.environ`, and API keys are left out of its
+`repr`. The pipeline reports progress through the `rag` logger and prints
+nothing on its own; call `rag.log.show_progress()` (as the CLI does) or
+configure `logging` yourself to see it.
 
 ## Supported inputs and providers
 

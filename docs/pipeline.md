@@ -21,6 +21,14 @@ covers steps 7–11.
 Expected failures raise subclasses of `rag.errors.RagError` whose messages say
 how to fix the problem; the CLI, API and UI show them as-is.
 
+Settings live in one immutable `rag.settings.Settings` object. `Pipeline` and
+every step take an optional `settings=`; without it they use
+`rag.settings.default_settings()` (the `.env` next to `config.py`).
+
+Steps report progress with `logging` under the `rag` logger rather than
+printing. The CLI, API and UI turn it on with `rag.log.show_progress()`; under
+`--json` the CLI sends it to stderr so stdout holds only the JSON.
+
 ## Metadata
 
 Each chunk carries `source_file`, `doc_id` (content hash), `file_type`, `page`
@@ -28,6 +36,11 @@ Each chunk carries `source_file`, `doc_id` (content hash), `file_type`, `page`
 `start_index`. Step 11 cites `source_file` and `page_number`.
 
 ## Notes per step
+
+- **Step 3: headers and footers.** A line that repeats on at least 60 % of the
+  pages (4+ pages, under 80 characters) is treated as a header or footer and
+  blanked where it appears as a whole line. The same words inside body text
+  are kept.
 
 - **Step 2: scanned PDFs do not work.** Extraction warns when a page yields no
   text. Add OCR (pytesseract / ocrmypdf) before step 3 in that case.
