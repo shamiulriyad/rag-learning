@@ -9,57 +9,74 @@
 
 `answer` has the [S1] markers stripped; each source carries its `marker` so a
 client can still map claims to chunks. `status` is "answered" or "no_results".
+Questions longer than QUESTION_MAX_CHARS are rejected with 422.
+
+`create_app(settings=..., pipeline=...)` builds an independent service, e.g.
+for tests or for embedding it in another program; `app` is the default one,
+configured from .env.
 
 Qdrant in local mode allows only one process at a time - run ingestion first,
-then start this with a single worker.
+then start this with a single worker. The service binds to 127.0.0.1 unless
+told otherwise, and has no authentication: do not expose it publicly.
 """
 
 import logging
 import os
+import threading
 from contextlib import asynccontextmanager
 from typing import List, Optional
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from rag.errors import RagError
 from rag.log import show_progress
 from rag.pipeline import Pipeline
+from rag.settings import Settings
 from rag.step11_answer import strip_markers  # noqa: F401 - re-exported for callers
 
 logger = logging.getLogger("rag.api")  # under "rag" so show_progress() prints it
 
-_pipeline: Optional[Pipeline] = None
+# Bounds the cost of a single request (embedding + LLM prompt size).
+QUESTION_MAX_CHARS = 4000
 
 
-def get_pipeline() -> Pipeline:
-    global _pipeline
-    if _pipeline is None:
-        _pipeline = Pipeline()
-    return _pipeline
+def _pipeline_for(app: FastAPI) -> Pipeline:
+    """The app's one Pipeline, created on first use. The lock matters: requests run
+    in a thread pool, and two Pipelines would open embedded Qdrant twice."""
+    state = app.state
+    with state.pipeline_lock:
+        if state.pipeline is None:
+            state.pipeline = Pipeline(settings=state.settings)
+            state.owns_pipeline = True
+        return state.pipeline
+
+
+def get_pipeline(request: Request) -> Pipeline:
+    """FastAPI dependency; tests swap it via app.dependency_overrides."""
+    return _pipeline_for(request.app)
 
 
 @asynccontextmanager
-async def lifespan(_app: FastAPI):
+async def lifespan(app: FastAPI):
     # Warm up at startup so the first real request is fast. If it fails (e.g. the
     # collection has not been ingested yet) the service still starts and /health
     # stays green; /query then returns a clear 503.
     show_progress()
     if os.getenv("RAG_API_WARMUP", "1") == "1":
         try:
-            get_pipeline().warm_up()
+            _pipeline_for(app).warm_up()
         except Exception as exc:  # noqa: BLE001 - reported back on /query
             logger.warning(f"[startup] not ready yet: {exc}")
     yield
-    if _pipeline is not None:
-        _pipeline.close()
-
-
-app = FastAPI(title="RAG toolkit service", lifespan=lifespan)
+    with app.state.pipeline_lock:
+        if app.state.pipeline is not None and app.state.owns_pipeline:
+            app.state.pipeline.close()
+            app.state.pipeline = None
 
 
 class QueryIn(BaseModel):
-    question: str
+    question: str = Field(max_length=QUESTION_MAX_CHARS)
     top_k: Optional[int] = Field(default=None, ge=1, le=50)
 
 
@@ -78,12 +95,11 @@ class AnswerOut(BaseModel):
     sources: List[SourceOut]
 
 
-@app.get("/health")
-def health() -> dict:
-    return {"status": "ok", "ready": _pipeline is not None and _pipeline.ready}
+def health(request: Request) -> dict:
+    pipeline = request.app.state.pipeline
+    return {"status": "ok", "ready": pipeline is not None and pipeline.ready}
 
 
-@app.post("/query", response_model=AnswerOut)
 def query(body: QueryIn, pipeline: Pipeline = Depends(get_pipeline)) -> AnswerOut:
     if not body.question.strip():
         raise HTTPException(status_code=400, detail="question is required")
@@ -102,3 +118,21 @@ def query(body: QueryIn, pipeline: Pipeline = Depends(get_pipeline)) -> AnswerOu
             for s in result.sources
         ],
     )
+
+
+def create_app(settings: Optional[Settings] = None,
+               pipeline: Optional[Pipeline] = None) -> FastAPI:
+    """A service with its own Pipeline. Without `pipeline`, one is created from
+    `settings` (default: the project's .env) on first use and closed on shutdown;
+    a pipeline passed in is left for the caller to close."""
+    app = FastAPI(title="RAG toolkit service", lifespan=lifespan)
+    app.state.settings = settings
+    app.state.pipeline = pipeline
+    app.state.owns_pipeline = False
+    app.state.pipeline_lock = threading.Lock()
+    app.get("/health")(health)
+    app.post("/query", response_model=AnswerOut)(query)
+    return app
+
+
+app = create_app()
