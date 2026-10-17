@@ -26,8 +26,39 @@ it, so a named environment alone proves nothing.
    environment `testpypi` (on test.pypi.org) and `pypi` (on pypi.org). No API
    tokens are created or stored. A pending publisher does not reserve the
    name; only the first upload does, separately on each index.
-3. **npm**: create the package `rag-kit-dev` and configure *trusted
-   publishing* for this repository, workflow `release.yml`, environment `npm`.
+3. **npm** (needed before the first `stage = release`, not for rehearsals):
+   trusted publishing can only be configured for a package that already exists,
+   and this repository never stores an npm token. So, once:
+   1. On npmjs.com, enable two-factor authentication in the
+      **"Authorization and writes"** mode (Account > Two-Factor Authentication),
+      so that publishing asks for your 2FA code, not only logging in.
+   2. In a terminal, sign in and check who you are and that the name is free:
+      ```bash
+      npm login                 # browser sign-in; a session on this computer only, never in CI
+      npm whoami                # must print: shamiul
+      npm view rag-kit-dev      # must fail with E404 (the name is still free)
+      ```
+      If `npm view` shows a package, stop: someone else has the name.
+   3. In an empty folder **outside this repository**, publish a placeholder with
+      no code: a `package.json` with `"name": "rag-kit-dev"`, `"version": "0.0.0"`,
+      `"license": "MIT"`, a `"description"` such as "Placeholder - install
+      rag-kit-dev 0.1.0 or later", no `bin` and no `scripts`, plus a short
+      README. Run `npm publish --access public` and enter your 2FA code when
+      asked. Then `npm view rag-kit-dev maintainers` must list `shamiul`.
+   4. No more than 2 days before the release run (npm drops a trusted-publisher
+      configuration that has not published within 2 days), on npmjs.com >
+      rag-kit-dev > Settings: add a *trusted publisher* for GitHub Actions,
+      `shamiulriyad` / `rag-learning` / workflow `release.yml` / environment
+      `npm`, and set *Publishing access* to require 2FA and disallow tokens.
+   5. After 0.1.0 is live: `npm deprecate rag-kit-dev@0.0.0 "placeholder, use 0.1.0 or later"`.
+
+   Before anything is published (in `verify`, before TestPyPI), a release
+   refuses to start unless npm's public metadata shows `rag-kit-dev` with at
+   least one version, `shamiul` among its maintainers (`NPM_MAINTAINER` in
+   `scripts/release_gate.py`), and not yet the version being released, or if
+   the registry cannot be reached or read. It cannot see the trusted-publisher
+   setting: if that (or OIDC, or the registry) fails, npm fails **after** PyPI
+   has published; the run fails, and the npm job is re-run once fixed.
    Publishing uses npm 11.5.1+ with provenance; no npm token is stored.
 4. Optional: make the CI jobs required checks for `main` (branch protection).
    Do not make the weekly external-link check required.
@@ -61,7 +92,10 @@ it, so a named environment alone proves nothing.
   exactly `rehearsal` or `release`; the tag is canonical and matches
   pyproject.toml, package.json and CHANGELOG.md; rehearsal uses a pre-release
   and release a final version; the tagged commit is on `main`; README links
-  resolve at it; the environments are protected as above.
+  resolve at it; the environments are protected as above. For a release, npm's
+  public metadata must show `rag-kit-dev` (the placeholder above) maintained by
+  `shamiul` and without the version being released. npm can still fail after
+  PyPI for reasons this cannot see (trusted publisher, OIDC, registry outage).
 - The full CI runs on the tag. Its build job records the expected file list,
   SHA-256 (and npm sha512 integrity) of the wheel, sdist and npm tarball, and
   checks that the sdist builds the same package as the wheel.

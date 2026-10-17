@@ -10,8 +10,12 @@
 # output. Publish jobs publish only files whose SHA-256 matches the manifest the
 # CI build job produced in this run, and afterwards compare what PyPI/npm report
 # with it. Environments must exist with required reviewers, no admin bypass and
-# v* tag-only deployments (checked by `verify`; see RELEASING.md). Publishing
-# uses trusted publishing (OIDC): no tokens are stored.
+# v* tag-only deployments (checked by `verify`; see RELEASING.md). For a release,
+# `verify` also checks npm's public metadata before anything is published: rag-kit-dev
+# exists, lists the expected maintainer, and does not have this version yet. npm can
+# still fail after PyPI (trusted publisher setup, OIDC, registry outage); that fails the
+# run and the npm job can be re-run. Publishing uses trusted publishing (OIDC): no
+# tokens are stored.
 
 name: Release
 
@@ -90,6 +94,13 @@ jobs:
           [ "$PRODUCTION" = "true" ] && environments=testpypi,pypi,npm
           uv run --no-project --with "packaging==26.3" python scripts/release_gate.py \
             check-environments --repo "$GITHUB_REPOSITORY" --environments "$environments"
+      - name: npm has rag-kit-dev, maintained by us, without this version (release only)
+        if: steps.authorize.outputs.production == 'true'
+        env:
+          VERSION: ${{ steps.authorize.outputs.version }}
+        run: |
+          uv run --no-project --with "packaging==26.3" python scripts/release_gate.py \
+            npm-preflight --version "$VERSION"
 
   ci:
     name: full CI on the tag

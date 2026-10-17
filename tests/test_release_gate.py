@@ -5,6 +5,7 @@ import json
 import shutil
 import subprocess
 import sys
+import urllib.error
 
 import pytest
 
@@ -325,6 +326,132 @@ def test_npm_integrity_mismatch_fails(tmp_path):
     other = "sha512-" + __import__("base64").b64encode(hashlib.sha512(b"other").digest()).decode()
     assert "npm reports integrity" in gate.compare_npm(manifest, other)[0]
     assert "exactly one tarball" in gate.compare_npm({"files": {}}, other)[0]
+
+
+# --- npm preflight: decided in verify, before anything is published ------------------------
+
+
+def _packument(*versions, maintainers=("shamiul",)):
+    return {
+        "name": "rag-kit-dev",
+        "versions": {version: {} for version in versions},
+        "maintainers": [{"name": name, "email": f"{name}@example.org"} for name in maintainers],
+    }
+
+
+@pytest.mark.parametrize(
+    "status, document, version, message",
+    [
+        (404, None, "0.1.0", "is not on npm yet"),
+        (500, None, "0.1.0", "refusing to publish unverified"),
+        (403, None, "0.1.0", "refusing to publish unverified"),
+        (200, {"name": "rag-kit-dev", "versions": {}}, "0.1.0", "without any published version"),
+        (200, {"name": "rag-kit-dev"}, "0.1.0", "without any published version"),
+        (200, None, "0.1.0", "without any published version"),
+        (200, ["not", "an", "object"], "0.1.0", "without any published version"),
+        (200, _packument("0.0.0", "0.1.0"), "0.1.0", "rag-kit-dev@0.1.0 is already on npm"),
+        (200, _packument("0.0.0", "0.1.1-rc.1"), "0.1.1rc1", "rag-kit-dev@0.1.1-rc.1 is already"),
+    ],
+)
+def test_npm_preflight_fails_closed(status, document, version, message):
+    problems = gate.npm_preflight(status, document, version)
+    assert len(problems) == 1 and message in problems[0]
+
+
+def test_npm_preflight_passes_once_the_placeholder_exists():
+    assert gate.npm_preflight(200, _packument("0.0.0"), "0.1.0") == []
+    assert gate.npm_preflight(200, _packument("0.0.0", "0.1.0"), "0.1.1") == []
+    shared = _packument("0.0.0", maintainers=("other", "shamiul"))
+    assert gate.npm_preflight(200, shared, "0.1.0") == []
+
+
+@pytest.mark.parametrize(
+    "maintainers",
+    [(), ("someone-else",), ("Shamiul",), ("shamiul-x",), (" shamiul",)],
+)
+def test_npm_preflight_refuses_a_package_we_do_not_maintain(maintainers):
+    problems = gate.npm_preflight(200, _packument("0.0.0", maintainers=maintainers), "0.1.0")
+    assert len(problems) == 1 and "is not maintained by 'shamiul'" in problems[0]
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        {"name": "rag-kit-dev", "versions": {"0.0.0": {}}},  # no maintainers field
+        {"name": "rag-kit-dev", "versions": {"0.0.0": {}}, "maintainers": "shamiul"},  # wrong type
+        {"name": "rag-kit-dev", "versions": {"0.0.0": {}}, "maintainers": ["shamiul"]},  # no names
+    ],
+)
+def test_npm_preflight_refuses_unreadable_maintainers(document):
+    assert "is not maintained by 'shamiul'" in gate.npm_preflight(200, document, "0.1.0")[0]
+
+
+# --- fetching: no answer, or an answer that is not JSON, fails closed with a clear message -----
+
+
+class _Answer:
+    def __init__(self, body, status=200):
+        self.body, self.status = body, status
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self):
+        return self.body
+
+
+@pytest.mark.parametrize(
+    "error, message",
+    [
+        (urllib.error.URLError("Name or service not known"), "cannot reach"),
+        (TimeoutError("timed out"), "cannot reach"),
+        (ConnectionRefusedError("refused"), "cannot reach"),
+    ],
+)
+def test_no_answer_fails_closed_with_a_clear_message(monkeypatch, capsys, error, message):
+    def no_answer(request, timeout):
+        raise error
+
+    monkeypatch.setattr(gate.urllib.request, "urlopen", no_answer)
+    with pytest.raises(gate.GateError, match=message):
+        gate.fetch_json("https://registry.npmjs.org/rag-kit-dev")
+    assert gate.main(["npm-preflight", "--version", "0.1.0"]) == 1
+    err = capsys.readouterr().err
+    assert "FAIL cannot reach https://registry.npmjs.org/rag-kit-dev" in err
+    assert "Traceback" not in err
+
+
+@pytest.mark.parametrize("body", [b"<html>maintenance</html>", b"", b"\xff\xfe not utf-8"])
+def test_an_answer_that_is_not_json_fails_closed(monkeypatch, capsys, body):
+    monkeypatch.setattr(gate.urllib.request, "urlopen", lambda request, timeout: _Answer(body))
+    assert gate.main(["npm-preflight", "--version", "0.1.0"]) == 1
+    assert "with a body that is not JSON" in capsys.readouterr().err
+
+
+def test_an_http_error_is_still_returned_as_a_status(monkeypatch):
+    def not_found(request, timeout):
+        raise urllib.error.HTTPError(request.full_url, 404, "Not Found", {}, None)
+
+    monkeypatch.setattr(gate.urllib.request, "urlopen", not_found)
+    assert gate.fetch_json("https://registry.npmjs.org/rag-kit-dev") == (404, None)
+
+
+def test_npm_preflight_cli_reads_the_registry(monkeypatch, capsys):
+    urls = []
+
+    def missing(url, token=None):
+        urls.append(url)
+        return 404, None
+
+    monkeypatch.setattr(gate, "fetch_json", missing)
+    assert gate.main(["npm-preflight", "--version", "0.1.0"]) == 1
+    assert urls == ["https://registry.npmjs.org/rag-kit-dev"]
+    assert "is not on npm yet" in capsys.readouterr().err
+    monkeypatch.setattr(gate, "fetch_json", lambda url, token=None: (200, _packument("0.0.0")))
+    assert gate.main(["npm-preflight", "--version", "0.1.0"]) == 0
 
 
 # --- R3: environment protection ----------------------------------------------------------

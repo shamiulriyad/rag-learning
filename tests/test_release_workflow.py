@@ -197,6 +197,20 @@ def test_verify_checks_the_environments_the_stage_uses(release):
     assert "environments=testpypi,pypi,npm" in step["run"]
 
 
+def test_a_release_checks_npm_before_anything_is_published(release):
+    steps = release["jobs"]["verify"]["steps"]
+    index = _step_index(steps, lambda s: "npm-preflight" in s.get("run", ""))
+    assert index is not None
+    step = steps[index]
+    # Only for a release: a rehearsal never touches npm and must not depend on it.
+    assert step["if"] == "steps.authorize.outputs.production == 'true'"
+    assert step["env"]["VERSION"] == "${{ steps.authorize.outputs.version }}"
+    assert index > _step_index(steps, lambda s: s.get("id") == "authorize")
+    # verify runs first, and every publish job needs it, so nothing is published before.
+    for name in PUBLISH_JOBS:
+        assert "verify" in _needs(release["jobs"][name])
+
+
 # --- general hardening ----------------------------------------------------------------------
 
 
