@@ -5,6 +5,7 @@
     release_gate.py verify-artifacts --kind python|npm --dir DIR --version V
     release_gate.py check-index --index pypi|testpypi --version V [--wait S]
     release_gate.py check-npm --version V [--wait S]
+    release_gate.py npm-preflight --version V                  # before anything is published
     release_gate.py check-environments --repo OWNER/REPO --environments a,b
 
 Manifests are read from environment variables (PYTHON_MANIFEST, NPM_MANIFEST),
@@ -33,6 +34,9 @@ from check_versions import ROOT, check, npm_form  # noqa: E402
 
 STAGES = ("rehearsal", "release")
 INDEXES = {"pypi": "https://pypi.org", "testpypi": "https://test.pypi.org"}
+NPM_REGISTRY = "https://registry.npmjs.org"
+NPM_PACKAGE = "rag-kit-dev"
+NPM_MAINTAINER = "shamiul"  # npm account that owns rag-kit-dev (RELEASING.md)
 TAG_POLICY = {"name": "v*", "type": "tag"}
 
 
@@ -189,8 +193,39 @@ def compare_npm(manifest: dict, integrity: str) -> list:
     )
 
 
+def npm_preflight(status: int, document, version: str) -> list:
+    """What can be known about npm before anything is published: rag-kit-dev exists
+    (trusted publishing cannot create a package; the one-time placeholder, RELEASING.md),
+    its public metadata lists NPM_MAINTAINER as a maintainer, and it does not have this
+    version yet (a version can never be published twice). It cannot see the trusted
+    publisher configuration, so npm can still fail after PyPI for other reasons."""
+    if status == 404:
+        return [f"{NPM_PACKAGE} is not on npm yet: trusted publishing cannot create a package; "
+                "publish the one-time placeholder first (RELEASING.md)"]
+    if status != 200:
+        return [f"cannot read {NPM_PACKAGE} from the npm registry (HTTP {status}); "
+                "refusing to publish unverified"]
+    document = document if isinstance(document, dict) else {}
+    versions = document.get("versions")
+    published = set(versions) if isinstance(versions, dict) else set()
+    if not published:
+        return [f"{NPM_PACKAGE} is on npm without any published version (unpublished?); "
+                "trusted publishing cannot be configured for it"]
+    listed = document.get("maintainers")
+    maintainers = [m.get("name") for m in (listed if isinstance(listed, list) else [])
+                   if isinstance(m, dict)]
+    if NPM_MAINTAINER not in maintainers:
+        return [f"{NPM_PACKAGE} on npm is not maintained by {NPM_MAINTAINER!r} "
+                f"(maintainers: {maintainers}); refusing to publish to a package we do not own"]
+    if npm_form(version) in published:
+        return [f"{NPM_PACKAGE}@{npm_form(version)} is already on npm; "
+                "a version can never be published twice"]
+    return []
+
+
 def fetch_json(url: str, token: str = None):
-    """(status, parsed JSON or None)."""
+    """(status, parsed JSON or None) for an HTTP answer. No answer (network error,
+    timeout) or an answer that is not JSON raises GateError: callers fail closed."""
     request = urllib.request.Request(url, headers={"Accept": "application/json"})
     if token:
         request.add_header("Authorization", f"Bearer {token}")
@@ -198,9 +233,18 @@ def fetch_json(url: str, token: str = None):
         request.add_header("X-GitHub-Api-Version", "2022-11-28")
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
-            return response.status, json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
+            status, raw = response.status, response.read()
+    except urllib.error.HTTPError as exc:  # an answer with an error status
         return exc.code, None
+    except (urllib.error.URLError, OSError) as exc:  # no answer: DNS, refused, timeout
+        reason = getattr(exc, "reason", None) or exc
+        raise GateError([f"cannot reach {url} ({type(exc).__name__}: {reason}); "
+                         "refusing to continue unverified"]) from None
+    try:
+        return status, json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise GateError([f"{url} answered HTTP {status} with a body that is not JSON "
+                         f"({type(exc).__name__}); refusing to continue unverified"]) from None
 
 
 def wait_for(probe, wait: float, interval: float = 20):
@@ -322,6 +366,9 @@ def main(argv=None) -> int:
     p.add_argument("--version", required=True)
     p.add_argument("--wait", type=float, default=0)
 
+    p = sub.add_parser("npm-preflight")
+    p.add_argument("--version", required=True)
+
     p = sub.add_parser("check-environments")
     p.add_argument("--repo", required=True)
     p.add_argument("--environments", required=True)
@@ -399,6 +446,15 @@ def main(argv=None) -> int:
             if problems:
                 raise GateError(problems)
             print(f"npm serves exactly the trusted build's tarball for {spec}.")
+            return 0
+
+        if args.command == "npm-preflight":
+            status, document = fetch_json(f"{NPM_REGISTRY}/{NPM_PACKAGE}")
+            problems = npm_preflight(status, document, args.version)
+            if problems:
+                raise GateError(problems)
+            print(f"npm has {NPM_PACKAGE}, maintained by {NPM_MAINTAINER}, and not yet "
+                  f"{NPM_PACKAGE}@{npm_form(args.version)}.")
             return 0
 
         if args.command == "check-environments":
