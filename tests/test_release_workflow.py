@@ -143,6 +143,73 @@ def test_publish_jobs_verify_before_and_check_after(release, job_name, kind, aft
     assert "ci" in _needs(release["jobs"][job_name])
 
 
+@pytest.mark.parametrize("job_name, plan, output", [
+    ("publish-testpypi", "upload-plan --index testpypi", "upload"),
+    ("publish-pypi", "upload-plan --index pypi", "upload"),
+    ("publish-npm", "npm-publish-plan", "publish"),
+])
+def test_uploads_happen_only_for_what_the_registry_lacks(release, job_name, plan, output):
+    """A re-run must not upload again what an earlier attempt already published."""
+    steps = release["jobs"][job_name]["steps"]
+    kind = "npm" if job_name == "publish-npm" else "python"
+    verify = _step_index(steps, lambda s: f"verify-artifacts --kind {kind}" in s.get("run", ""))
+    planned = _step_index(steps, lambda s: plan in s.get("run", ""))
+    publish = _step_index(steps, lambda s: "gh-action-pypi-publish" in s.get("uses", "")
+                          or "npm publish" in s.get("run", ""))
+    assert verify is not None and planned is not None and verify < planned < publish
+    step = steps[planned]
+    assert step["id"] == "plan" and '--github-output "$GITHUB_OUTPUT"' in step["run"]
+    manifest = "PYTHON_MANIFEST" if kind == "python" else "NPM_MANIFEST"
+    assert step["env"][manifest] == f"${{{{ needs.ci.outputs.{kind}-manifest }}}}"
+    assert step["env"]["VERSION"] == "${{ needs.verify.outputs.version }}"
+    assert steps[publish]["if"] == f"steps.plan.outputs.{output} == 'true'"
+    # No blind retries: the upload action never skips existing files on its own.
+    assert "skip-existing" not in (steps[publish].get("with") or {})
+    # Only the upload is conditional; verification before and after always runs.
+    assert all("if" not in s for i, s in enumerate(steps) if i != publish), job_name
+
+
+def test_npm_is_published_only_while_pypi_still_serves_the_trusted_build(release):
+    """The generator pins ragkit-dev==VERSION. PyPI can change after smoke-pypi (a yank
+    before this job is re-run), so the npm job looks at PyPI again right before it
+    plans and publishes, and nothing can skip that look."""
+    job = release["jobs"]["publish-npm"]
+    steps = job["steps"]
+    pypi = _step_index(steps, lambda s: "check-index" in s.get("run", ""))
+    planned = _step_index(steps, lambda s: "npm-publish-plan" in s.get("run", ""))
+    publish = _step_index(steps, lambda s: "npm publish" in s.get("run", ""))
+    assert pypi is not None and pypi < planned < publish
+    step = steps[pypi]
+    assert "release_gate.py" in step["run"]
+    assert 'check-index --index pypi --version "$VERSION"' in step["run"]
+    assert "--wait" not in step["run"]  # one look: a file still missing is a failure here
+    assert step["env"] == {"PYTHON_MANIFEST": "${{ needs.ci.outputs.python-manifest }}",
+                           "VERSION": "${{ needs.verify.outputs.version }}"}
+    # Cannot be bypassed: no condition, no tolerated failure, on the step or the job.
+    assert "if" not in step and "continue-on-error" not in step
+    assert "continue-on-error" not in job
+    # Still only in a production release, after PyPI's own end-to-end check.
+    assert job["if"] == PRODUCTION_GATE
+    assert {"verify", "ci", "smoke-pypi"} <= set(_needs(job))
+    assert "publish-npm" not in _runnable(release, production="false")
+
+
+def test_no_publish_job_tolerates_a_failing_step(release):
+    for name in PUBLISH_JOBS:
+        job = release["jobs"][name]
+        assert "continue-on-error" not in job, name
+        assert all("continue-on-error" not in s for s in job["steps"]), name
+
+
+def test_release_artifacts_outlive_the_re_run_window(ci):
+    """GitHub re-runs failed jobs for up to 30 days; a re-run downloads these artifacts."""
+    uploads = [s for s in ci["jobs"]["build"]["steps"]
+               if s.get("uses", "").startswith("actions/upload-artifact@")]
+    assert {s["with"]["name"] for s in uploads} == {"python-dist", "npm-dist"}
+    for step in uploads:
+        assert step["with"]["retention-days"] == "${{ github.ref_type == 'tag' && 30 || 14 }}"
+
+
 def test_manifests_come_from_the_ci_build_job(ci):
     outputs = ci["on"]["workflow_call"]["outputs"]
     assert outputs["python-manifest"]["value"] == "${{ jobs.build.outputs.python-manifest }}"

@@ -52,8 +52,13 @@ def check(root: Path, tag: str = None) -> list:
         problems.append("versions differ: " + ", ".join(f"{k}={v}" for k, v in versions.items()))
     version = parsed["pyproject.toml"]
     changelog = (root / "CHANGELOG.md").read_text(encoding="utf-8")
-    if not re.search(rf"^## {re.escape(str(version))}\b", changelog, re.M):
+    heading = re.search(rf"^## {re.escape(str(version))}\b(.*)$", changelog, re.M)
+    if not heading:
         problems.append(f"CHANGELOG.md has no '## {version}' section")
+    elif tag is not None and not version.is_prerelease and "unreleased" in heading[1].lower():
+        # A final release is permanent; its notes must not ship saying "unreleased".
+        problems.append(f"CHANGELOG.md still marks {version} as unreleased; "
+                        "replace that with the release date before tagging")
     if tag is not None:
         if not tag.startswith("v"):
             problems.append(f"tag {tag!r} must look like v{version}")
