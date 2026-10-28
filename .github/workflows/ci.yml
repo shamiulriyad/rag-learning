@@ -185,18 +185,20 @@ jobs:
         run: |
           uv run --no-project --with "packaging==26.3" python scripts/release_gate.py \
             --github-output "$GITHUB_OUTPUT" manifest --dist dist --npm dist-npm
+      # A release (run from a v* tag) keeps its verified files for 30 days, as long as
+      # GitHub allows re-running its failed jobs; recovery re-runs must find them.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: python-dist
           path: dist/
           if-no-files-found: error
-          retention-days: 14
+          retention-days: ${{ github.ref_type == 'tag' && 30 || 14 }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: npm-dist
           path: dist-npm/
           if-no-files-found: error
-          retention-days: 14
+          retention-days: ${{ github.ref_type == 'tag' && 30 || 14 }}
 
   wheel-tests:
     name: installed wheel (${{ matrix.os }}, Python ${{ matrix.python }})

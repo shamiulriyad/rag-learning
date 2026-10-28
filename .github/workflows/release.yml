@@ -14,8 +14,13 @@
 # `verify` also checks npm's public metadata before anything is published: rag-kit-dev
 # exists, lists the expected maintainer, and does not have this version yet. npm can
 # still fail after PyPI (trusted publisher setup, OIDC, registry outage); that fails the
-# run and the npm job can be re-run. Publishing uses trusted publishing (OIDC): no
-# tokens are stored.
+# run. Publishing uses trusted publishing (OIDC): no tokens are stored.
+#
+# Recovery: "Re-run failed jobs" (within 30 days; release artifacts are kept that long).
+# Before each upload, an upload plan asks the registry what it already has for this
+# version: files with exactly the build's hashes are skipped, other bytes fail the
+# job, so a re-run completes a partial release without uploading anything twice.
+# RELEASING.md has the procedure for each partial-release case.
 
 name: Release
 
@@ -136,7 +141,16 @@ jobs:
         run: |
           uv run --no-project --with "packaging==26.3" python scripts/release_gate.py \
             verify-artifacts --kind python --dir dist --version "$VERSION"
+      - name: Upload only what TestPyPI does not already have with these hashes (re-runs)
+        id: plan
+        env:
+          PYTHON_MANIFEST: ${{ needs.ci.outputs.python-manifest }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          uv run --no-project --with "packaging==26.3" python scripts/release_gate.py \
+            --github-output "$GITHUB_OUTPUT" upload-plan --index testpypi --dir dist --version "$VERSION"
       - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        if: steps.plan.outputs.upload == 'true'
         with:
           repository-url: https://test.pypi.org/legacy/
           print-hash: true
@@ -218,7 +232,16 @@ jobs:
         run: |
           uv run --no-project --with "packaging==26.3" python scripts/release_gate.py \
             verify-artifacts --kind python --dir dist --version "$VERSION"
+      - name: Upload only what PyPI does not already have with these hashes (re-runs)
+        id: plan
+        env:
+          PYTHON_MANIFEST: ${{ needs.ci.outputs.python-manifest }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          uv run --no-project --with "packaging==26.3" python scripts/release_gate.py \
+            --github-output "$GITHUB_OUTPUT" upload-plan --index pypi --dir dist --version "$VERSION"
       - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        if: steps.plan.outputs.upload == 'true'
         with:
           print-hash: true
       - name: PyPI reports exactly the trusted build's SHA-256
@@ -308,7 +331,26 @@ jobs:
         run: |
           npm --version
           node -e "const [a,b,c]=process.argv[1].split('.').map(Number); process.exit(a>11||(a===11&&(b>5||(b===5&&c>=1)))?0:1)" "$(npm --version)"
+      # The generator pins ragkit-dev==VERSION: right before npm, PyPI must still serve
+      # exactly the trusted build's files, none yanked (it may have changed since
+      # smoke-pypi, e.g. yanked before a re-run of this job). One look, no waiting.
+      - name: PyPI still serves exactly the trusted build, not yanked
+        env:
+          PYTHON_MANIFEST: ${{ needs.ci.outputs.python-manifest }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          uv run --no-project --with "packaging==26.3" python scripts/release_gate.py \
+            check-index --index pypi --version "$VERSION"
+      - name: Publish only if npm does not already have this version with these bytes (re-runs)
+        id: plan
+        env:
+          NPM_MANIFEST: ${{ needs.ci.outputs.npm-manifest }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          uv run --no-project --with "packaging==26.3" python scripts/release_gate.py \
+            --github-output "$GITHUB_OUTPUT" npm-publish-plan --version "$VERSION"
       - name: Publish the verified tarball (provenance, no lifecycle scripts)
+        if: steps.plan.outputs.publish == 'true'
         env:
           NPM_VERSION: ${{ needs.verify.outputs.npm-version }}
         run: npm publish --provenance --access public --ignore-scripts "dist-npm/rag-kit-dev-${NPM_VERSION}.tgz"

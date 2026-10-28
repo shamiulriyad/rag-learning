@@ -7,6 +7,15 @@
     release_gate.py check-npm --version V [--wait S]
     release_gate.py npm-preflight --version V                  # before anything is published
     release_gate.py check-environments --repo OWNER/REPO --environments a,b
+    release_gate.py upload-plan --index pypi|testpypi --dir DIR --version V
+    release_gate.py npm-publish-plan --version V                # just before npm publish
+
+Registry uploads cannot be repeated (a version and a file name are used once), so
+a re-run must not upload what the registry already has. upload-plan and
+npm-publish-plan ask the registry first: files it already holds with exactly the
+trusted build's hashes are skipped, anything else it holds for this version
+(other bytes, unexpected or yanked files, an ambiguous file list) fails the job,
+and only what is missing is published. Uploads are never retried blindly.
 
 Manifests are read from environment variables (PYTHON_MANIFEST, NPM_MANIFEST),
 never interpolated into shell. Outputs for $GITHUB_OUTPUT are written with
@@ -24,6 +33,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -160,11 +170,46 @@ def verify_artifacts(manifest: dict, directory: Path, kind: str, version: str) -
     return problems
 
 
+INDEX_MISSING = "index is missing "  # the only problem that may still be propagating
+
+
+def _index_files(release_json) -> tuple:
+    """({file name: sha256}, problems) from PyPI's JSON API for one release. Anything
+    that would make the file list ambiguous is a problem, never dropped or overwritten:
+    an entry that is not an object or has no file name, a file listed twice, and a
+    yanked file (a withdrawn release is never "already published")."""
+    urls = release_json.get("urls") if isinstance(release_json, dict) else None
+    if not isinstance(urls, list):
+        return {}, ["the index answered without a file list; refusing to continue unverified"]
+    files, problems = {}, []
+    for entry in urls:
+        if not isinstance(entry, dict):
+            problems.append(f"the index lists a file entry that is not an object: {entry!r}")
+            continue
+        name = entry.get("filename")
+        if not isinstance(name, str) or not name:
+            problems.append(f"the index lists a file without a file name: {entry!r}")
+            continue
+        if name in files:
+            problems.append(f"the index lists {name} more than once")
+            continue
+        if entry.get("yanked"):
+            problems.append(f"the index reports {name} as yanked: this version was withdrawn, "
+                            "release the next version")
+        digests = entry.get("digests")
+        if not isinstance(digests, dict):
+            problems.append(f"the index lists {name} without a digests object: {digests!r}")
+            digests = {}
+        files[name] = digests.get("sha256")
+    return files, problems
+
+
 def compare_index(manifest: dict, release_json: dict) -> list:
-    """PyPI's JSON API for one release vs the manifest: same files, same sha256."""
-    reported = {u["filename"]: u["digests"]["sha256"] for u in release_json.get("urls", [])}
+    """PyPI's JSON API for one release vs the manifest: same files, same sha256,
+    none of them yanked."""
+    reported, problems = _index_files(release_json)
     expected = {name: d["sha256"] for name, d in manifest["files"].items()}
-    problems = [f"index is missing {name}" for name in sorted(set(expected) - set(reported))]
+    problems += [f"{INDEX_MISSING}{name}" for name in sorted(set(expected) - set(reported))]
     problems += [
         f"index has an unexpected file {name}" for name in sorted(set(reported) - set(expected))
     ]
@@ -220,19 +265,95 @@ def npm_preflight(status: int, document, version: str) -> list:
     if npm_form(version) in published:
         return [f"{NPM_PACKAGE}@{npm_form(version)} is already on npm; "
                 "a version can never be published twice"]
+    if _unpublished(document, version):
+        return [f"{NPM_PACKAGE}@{npm_form(version)} was published and then unpublished; "
+                "npm never allows that version again: release the next version"]
     return []
+
+
+def _unpublished(document: dict, version: str) -> bool:
+    """True if npm's `time` map lists the version although `versions` does not. npm
+    adds a version to `time` only when it is published, and the registry appears to
+    keep that entry after an unpublish (observed behaviour, not documented by npm).
+    Without the entry this check simply does not fire; npm then refuses the publish."""
+    times = document.get("time")
+    return isinstance(times, dict) and npm_form(version) in times
+
+
+# --- resume: publish only what the registry does not already have ---------------------------
+
+
+def python_upload_plan(manifest: dict, status: int, release_json) -> tuple:
+    """(file names still to upload, problems) for one release on PyPI/TestPyPI, from its
+    JSON API answer. 404: nothing is there yet, upload everything. 200: files with the
+    build's sha256 are already published and are skipped; another sha256, a file the
+    build does not have, a yanked file or an ambiguous file list means this version is
+    not ours to complete."""
+    expected = {name: d["sha256"] for name, d in manifest["files"].items()}
+    if status == 404:
+        return sorted(expected), []
+    if status != 200:
+        return [], [f"cannot read the release from the index (HTTP {status}); "
+                    "refusing to upload unverified"]
+    reported, problems = _index_files(release_json)
+    if problems:
+        return [], problems
+    problems = [f"the index already has {name}, which this build did not produce"
+                for name in sorted(set(reported) - set(expected))]
+    problems += [f"the index already has {name} with sha256 {reported[name]}, this build's is "
+                 f"{expected[name]}: this version was published from other files"
+                 for name in sorted(set(reported) & set(expected))
+                 if reported[name] != expected[name]]
+    if problems:
+        return [], problems
+    return sorted(set(expected) - set(reported)), []
+
+
+def npm_publish_plan(manifest: dict, status: int, document, version: str) -> tuple:
+    """(publish needed?, problems), from the registry's document for rag-kit-dev."""
+    spec = f"{NPM_PACKAGE}@{npm_form(version)}"
+    if status != 200 or not isinstance(document, dict):
+        return False, [f"cannot read {NPM_PACKAGE} from the npm registry (HTTP {status}); "
+                       "refusing to publish unverified"]
+    versions = document.get("versions")
+    entry = versions.get(npm_form(version)) if isinstance(versions, dict) else None
+    if entry is None:
+        if _unpublished(document, version):
+            return False, [f"{spec} was published and then unpublished; npm never allows it again"]
+        return True, []
+    integrity = ((entry if isinstance(entry, dict) else {}).get("dist") or {}).get("integrity")
+    problems = compare_npm(manifest, integrity or "")
+    if problems:
+        return False, [f"{spec} is already on npm from other files: {problems[0]}"]
+    return False, []
+
+
+class _SameOriginRedirects(urllib.request.HTTPRedirectHandler):
+    """Follows a redirect only to the same scheme and host. urllib would otherwise
+    follow one anywhere, Authorization header included."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        old, new = urllib.parse.urlsplit(req.full_url), urllib.parse.urlsplit(newurl)
+        if (new.scheme, new.hostname, new.port) != (old.scheme, old.hostname, old.port):
+            raise GateError([f"{req.full_url} redirected to {newurl} (HTTP {code}), another "
+                             "host or scheme; refusing to continue unverified"])
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_OPENER = urllib.request.build_opener(_SameOriginRedirects)
 
 
 def fetch_json(url: str, token: str = None):
     """(status, parsed JSON or None) for an HTTP answer. No answer (network error,
-    timeout) or an answer that is not JSON raises GateError: callers fail closed."""
+    timeout), an answer that is not JSON or a redirect to another host raises
+    GateError: callers fail closed."""
     request = urllib.request.Request(url, headers={"Accept": "application/json"})
     if token:
         request.add_header("Authorization", f"Bearer {token}")
         request.add_header("Accept", "application/vnd.github+json")
         request.add_header("X-GitHub-Api-Version", "2022-11-28")
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
+        with _OPENER.open(request, timeout=30) as response:
             status, raw = response.status, response.read()
     except urllib.error.HTTPError as exc:  # an answer with an error status
         return exc.code, None
@@ -373,6 +494,14 @@ def main(argv=None) -> int:
     p.add_argument("--repo", required=True)
     p.add_argument("--environments", required=True)
 
+    p = sub.add_parser("upload-plan")
+    p.add_argument("--index", choices=sorted(INDEXES), required=True)
+    p.add_argument("--dir", type=Path, required=True)
+    p.add_argument("--version", required=True)
+
+    p = sub.add_parser("npm-publish-plan")
+    p.add_argument("--version", required=True)
+
     args = parser.parse_args(argv)
     try:
         if args.command == "authorize":
@@ -416,10 +545,10 @@ def main(argv=None) -> int:
                 if status != 200:
                     return False, [f"{url} answered HTTP {status}"]
                 problems = compare_index(manifest, release)
-                # A file still missing may just be propagating; a wrong hash never is.
-                return not any("missing" in p for p in problems) or any(
-                    "sha256" in p or "unexpected" in p for p in problems
-                ), problems
+                # A file still missing may just be propagating; anything else (a wrong
+                # hash, an unexpected or yanked file, an ambiguous list) never is.
+                propagating = problems and all(p.startswith(INDEX_MISSING) for p in problems)
+                return not propagating, problems
 
             problems = wait_for(probe, args.wait)
             if problems:
@@ -469,6 +598,39 @@ def main(argv=None) -> int:
                 f"environments {', '.join(names)}: required reviewers, no admin bypass, "
                 f"deployments only from tags {TAG_POLICY['name']}."
             )
+            return 0
+
+        if args.command == "upload-plan":
+            manifest = _manifest_from_env("PYTHON_MANIFEST")
+            problems = verify_artifacts(manifest, args.dir, "python", args.version)
+            if problems:
+                raise GateError(problems)
+            url = f"{INDEXES[args.index]}/pypi/ragkit-dev/{args.version}/json"
+            status, release = fetch_json(url)
+            upload, problems = python_upload_plan(manifest, status, release)
+            if problems:
+                raise GateError(problems)
+            # The upload action publishes every file in the folder; drop the ones the
+            # index already serves with exactly these bytes.
+            for name in sorted(set(manifest["files"]) - set(upload)):
+                (args.dir / name).unlink()
+                print(f"{args.index} already has {name} with the build's sha256: "
+                      "not uploaded again")
+            for name in upload:
+                print(f"to upload to {args.index}: {name}")
+            _write_outputs(args.github_output, {"upload": "true" if upload else "false"})
+            return 0
+
+        if args.command == "npm-publish-plan":
+            manifest = _manifest_from_env("NPM_MANIFEST")
+            status, document = fetch_json(f"{NPM_REGISTRY}/{NPM_PACKAGE}")
+            publish, problems = npm_publish_plan(manifest, status, document, args.version)
+            if problems:
+                raise GateError(problems)
+            if not publish:
+                print(f"npm already serves {NPM_PACKAGE}@{npm_form(args.version)} with the "
+                      "build's integrity: not published again")
+            _write_outputs(args.github_output, {"publish": "true" if publish else "false"})
             return 0
     except GateError as error:
         for problem in error.problems:

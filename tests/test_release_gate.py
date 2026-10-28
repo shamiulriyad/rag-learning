@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import urllib.error
+import urllib.request
 
 import pytest
 
@@ -136,6 +137,29 @@ def test_versions_must_agree_and_have_a_changelog_entry(tmp_path):
     (root / "CHANGELOG.md").write_text("# Changelog\n", encoding="utf-8")
     problems = _problems(lambda: gate.authorize("release", "v0.1.0", root))
     assert "versions differ" in problems and "CHANGELOG.md has no" in problems
+
+
+def test_a_final_release_refuses_changelog_notes_marked_unreleased(tmp_path):
+    root = _project(tmp_path, "0.1.0")
+    (root / "CHANGELOG.md").write_text("# Changelog\n\n## 0.1.0 (unreleased)\n", encoding="utf-8")
+    assert "still marks 0.1.0 as unreleased" in _problems(
+        lambda: gate.authorize("release", "v0.1.0", root))
+    (root / "CHANGELOG.md").write_text("# Changelog\n\n## 0.1.0 (2026-11-02)\n", encoding="utf-8")
+    assert gate.authorize("release", "v0.1.0", root)["production"] == "true"
+
+
+def test_unreleased_notes_are_fine_before_tagging_and_for_release_candidates(tmp_path):
+    candidate = tmp_path / "candidate"
+    candidate.mkdir()
+    _project(candidate, "0.1.0rc1")
+    (candidate / "CHANGELOG.md").write_text("# Changelog\n\n## 0.1.0rc1 (unreleased)\n",
+                                            encoding="utf-8")
+    assert gate.authorize("rehearsal", "v0.1.0rc1", candidate)["production"] == "false"
+    final = tmp_path / "final"
+    final.mkdir()
+    _project(final, "0.1.0")
+    (final / "CHANGELOG.md").write_text("# Changelog\n\n## 0.1.0 (unreleased)\n", encoding="utf-8")
+    assert gate.check(final) == []  # CI on every commit; only the tag check refuses it
 
 
 def test_authorize_cli_writes_outputs_only_on_success(tmp_path):
@@ -415,7 +439,7 @@ def test_no_answer_fails_closed_with_a_clear_message(monkeypatch, capsys, error,
     def no_answer(request, timeout):
         raise error
 
-    monkeypatch.setattr(gate.urllib.request, "urlopen", no_answer)
+    monkeypatch.setattr(gate._OPENER, "open", no_answer)
     with pytest.raises(gate.GateError, match=message):
         gate.fetch_json("https://registry.npmjs.org/rag-kit-dev")
     assert gate.main(["npm-preflight", "--version", "0.1.0"]) == 1
@@ -426,7 +450,7 @@ def test_no_answer_fails_closed_with_a_clear_message(monkeypatch, capsys, error,
 
 @pytest.mark.parametrize("body", [b"<html>maintenance</html>", b"", b"\xff\xfe not utf-8"])
 def test_an_answer_that_is_not_json_fails_closed(monkeypatch, capsys, body):
-    monkeypatch.setattr(gate.urllib.request, "urlopen", lambda request, timeout: _Answer(body))
+    monkeypatch.setattr(gate._OPENER, "open", lambda request, timeout: _Answer(body))
     assert gate.main(["npm-preflight", "--version", "0.1.0"]) == 1
     assert "with a body that is not JSON" in capsys.readouterr().err
 
@@ -435,8 +459,36 @@ def test_an_http_error_is_still_returned_as_a_status(monkeypatch):
     def not_found(request, timeout):
         raise urllib.error.HTTPError(request.full_url, 404, "Not Found", {}, None)
 
-    monkeypatch.setattr(gate.urllib.request, "urlopen", not_found)
+    monkeypatch.setattr(gate._OPENER, "open", not_found)
     assert gate.fetch_json("https://registry.npmjs.org/rag-kit-dev") == (404, None)
+
+
+@pytest.mark.parametrize("target", [
+    "https://evil.example/pypi/ragkit-dev/0.1.0/json",     # another host
+    "http://pypi.org/pypi/ragkit-dev/0.1.0/json",          # https -> http
+    "https://pypi.org:8443/pypi/ragkit-dev/0.1.0/json",    # another port
+    "https://pypi.org.evil.example/pypi/ragkit-dev/json",  # look-alike host
+])
+def test_a_redirect_to_another_origin_is_refused(target):
+    request = urllib.request.Request("https://pypi.org/pypi/ragkit-dev/0.1.0/json",
+                                     headers={"Authorization": "Bearer secret"})
+    with pytest.raises(gate.GateError, match="another host or scheme"):
+        gate._SameOriginRedirects().redirect_request(request, None, 301, "Moved", {}, target)
+
+
+def test_a_redirect_on_the_same_origin_is_followed():
+    request = urllib.request.Request("https://pypi.org/pypi/RagKit-Dev/0.1.0/json")
+    target = "https://pypi.org/pypi/ragkit-dev/0.1.0/json"
+    followed = gate._SameOriginRedirects().redirect_request(request, None, 301, "Moved", {},
+                                                            target)
+    assert followed.full_url == target
+
+
+def test_fetch_json_uses_the_same_origin_opener():
+    assert any(isinstance(h, gate._SameOriginRedirects) for h in gate._OPENER.handlers)
+    # No plain redirect handler next to it that would follow anything.
+    assert [type(h) for h in gate._OPENER.handlers
+            if isinstance(h, urllib.request.HTTPRedirectHandler)] == [gate._SameOriginRedirects]
 
 
 def test_npm_preflight_cli_reads_the_registry(monkeypatch, capsys):
@@ -452,6 +504,333 @@ def test_npm_preflight_cli_reads_the_registry(monkeypatch, capsys):
     assert "is not on npm yet" in capsys.readouterr().err
     monkeypatch.setattr(gate, "fetch_json", lambda url, token=None: (200, _packument("0.0.0")))
     assert gate.main(["npm-preflight", "--version", "0.1.0"]) == 0
+
+
+def test_npm_preflight_refuses_a_version_that_was_unpublished():
+    # npm drops an unpublished version from `versions` but keeps it in `time`, and
+    # never accepts it again: this must fail before PyPI, not in the npm job.
+    document = _packument("0.0.0")
+    document["time"] = {"created": "x", "modified": "x", "0.0.0": "x", "0.1.0": "x"}
+    problems = gate.npm_preflight(200, document, "0.1.0")
+    assert len(problems) == 1 and "published and then unpublished" in problems[0]
+    document["time"] = {"created": "x", "modified": "x", "0.0.0": "x"}
+    assert gate.npm_preflight(200, document, "0.1.0") == []
+
+
+# --- resume: a re-run uploads only what the registry does not already have -----------------
+
+
+def test_upload_plan_uploads_everything_when_the_release_is_absent(tmp_path):
+    dist, _ = _artifacts(tmp_path)
+    manifest = gate.build_manifest(dist, "python", "0.1.0")
+    assert gate.python_upload_plan(manifest, 404, None) == (sorted(manifest["files"]), [])
+
+
+def test_upload_plan_skips_files_already_published_with_the_same_bytes(tmp_path):
+    dist, _ = _artifacts(tmp_path)
+    manifest = gate.build_manifest(dist, "python", "0.1.0")
+    assert gate.python_upload_plan(manifest, 200, _release_json(manifest)) == ([], [])
+    # The wheel went up, the sdist did not (an interrupted upload): finish with the sdist.
+    partial = _release_json(manifest, drop="ragkit_dev-0.1.0.tar.gz")
+    assert gate.python_upload_plan(manifest, 200, partial) == (["ragkit_dev-0.1.0.tar.gz"], [])
+
+
+@pytest.mark.parametrize("status, answer, message", [
+    (200, "changed", "published from other files"),
+    (200, "extra", "which this build did not produce"),
+    (200, {"info": {}}, "without a file list"),
+    (200, None, "without a file list"),
+    (500, None, "refusing to upload unverified"),
+    (403, None, "refusing to upload unverified"),
+])
+def test_upload_plan_fails_closed_on_anything_else(tmp_path, status, answer, message):
+    dist, _ = _artifacts(tmp_path)
+    manifest = gate.build_manifest(dist, "python", "0.1.0")
+    if answer == "changed":
+        answer = _release_json(manifest, change="f" * 64)
+    elif answer == "extra":
+        answer = _release_json(manifest, add="ragkit_dev-0.1.0-cp311-win_amd64.whl")
+    upload, problems = gate.python_upload_plan(manifest, status, answer)
+    assert upload == [] and problems and message in problems[0]
+
+
+def _plan_cli(monkeypatch, tmp_path, dist, manifest, answer, fetched=True):
+    urls = []
+
+    def index(url, token=None):
+        urls.append(url)
+        return answer
+
+    monkeypatch.setattr(gate, "fetch_json", index)
+    monkeypatch.setenv("PYTHON_MANIFEST", json.dumps(manifest))
+    out = tmp_path / "github_output"
+    code = gate.main(["--github-output", str(out), "upload-plan", "--index", "pypi",
+                      "--dir", str(dist), "--version", "0.1.0"])
+    # Exactly one read of exactly this release, or none when the local files fail first.
+    assert urls == (["https://pypi.org/pypi/ragkit-dev/0.1.0/json"] if fetched else [])
+    return code, out.read_text(encoding="utf-8") if out.exists() else None
+
+
+def test_upload_plan_cli_leaves_only_the_missing_files(monkeypatch, tmp_path):
+    dist, _ = _artifacts(tmp_path)
+    manifest = gate.build_manifest(dist, "python", "0.1.0")
+    partial = _release_json(manifest, drop="ragkit_dev-0.1.0.tar.gz")
+    code, output = _plan_cli(monkeypatch, tmp_path, dist, manifest, (200, partial))
+    assert code == 0 and output == "upload=true\n"
+    assert sorted(p.name for p in dist.iterdir()) == ["ragkit_dev-0.1.0.tar.gz"]
+
+
+def test_upload_plan_cli_uploads_nothing_when_all_is_published(monkeypatch, tmp_path):
+    dist, _ = _artifacts(tmp_path)
+    manifest = gate.build_manifest(dist, "python", "0.1.0")
+    code, output = _plan_cli(monkeypatch, tmp_path, dist, manifest,
+                             (200, _release_json(manifest)))
+    assert code == 0 and output == "upload=false\n"
+
+
+def test_upload_plan_cli_fails_closed_and_keeps_the_files(monkeypatch, tmp_path, capsys):
+    dist, _ = _artifacts(tmp_path)
+    manifest = gate.build_manifest(dist, "python", "0.1.0")
+    changed = _release_json(manifest, change="f" * 64)
+    code, output = _plan_cli(monkeypatch, tmp_path, dist, manifest, (200, changed))
+    assert code == 1 and output is None  # no upload=... at all on failure
+    assert "published from other files" in capsys.readouterr().err
+    assert len(list(dist.iterdir())) == 2
+
+
+def test_upload_plan_cli_verifies_the_local_files_first(monkeypatch, tmp_path, capsys):
+    dist, _ = _artifacts(tmp_path)
+    manifest = gate.build_manifest(dist, "python", "0.1.0")
+    (dist / "ragkit_dev-0.1.0.tar.gz").write_bytes(b"tampered")
+    code, output = _plan_cli(monkeypatch, tmp_path, dist, manifest, (404, None), fetched=False)
+    assert code == 1 and output is None
+    assert "does not match the build's" in capsys.readouterr().err
+
+
+# --- yanked and ambiguous file lists: never "already published", in plan or check ----------
+
+
+WHEEL, SDIST = "ragkit_dev-0.1.0-py3-none-any.whl", "ragkit_dev-0.1.0.tar.gz"
+
+
+def _yanked(manifest, name=WHEEL, drop=None):
+    """Every file the build has, with the build's sha256, but `name` yanked on the index."""
+    release = _release_json(manifest, drop=drop)
+    for entry in release["urls"]:
+        entry["yanked"] = entry["filename"] == name
+        entry["yanked_reason"] = "broken" if entry["yanked"] else None
+    return release
+
+
+def test_a_yanked_file_with_matching_hashes_is_not_an_identical_release(tmp_path):
+    dist, _ = _artifacts(tmp_path)
+    manifest = gate.build_manifest(dist, "python", "0.1.0")
+    upload, problems = gate.python_upload_plan(manifest, 200, _yanked(manifest))
+    assert upload == [] and problems == [
+        f"the index reports {WHEEL} as yanked: this version was withdrawn, "
+        "release the next version"]
+    assert gate.compare_index(manifest, _yanked(manifest)) == problems
+    # Not yanked (False, as PyPI reports it) is still the identical release.
+    assert gate.python_upload_plan(manifest, 200, _yanked(manifest, name=None)) == ([], [])
+    assert gate.compare_index(manifest, _yanked(manifest, name=None)) == []
+
+
+def test_a_yanked_file_blocks_completing_a_partial_release(tmp_path):
+    dist, _ = _artifacts(tmp_path)
+    manifest = gate.build_manifest(dist, "python", "0.1.0")
+    partial = _yanked(manifest, name=WHEEL, drop=SDIST)  # the sdist would otherwise go up
+    upload, problems = gate.python_upload_plan(manifest, 200, partial)
+    assert upload == [] and "as yanked" in problems[0]
+
+
+def test_upload_plan_cli_refuses_a_yanked_release_and_keeps_the_files(monkeypatch, tmp_path,
+                                                                    capsys):
+    dist, _ = _artifacts(tmp_path)
+    manifest = gate.build_manifest(dist, "python", "0.1.0")
+    code, output = _plan_cli(monkeypatch, tmp_path, dist, manifest, (200, _yanked(manifest)))
+    assert code == 1 and output is None  # no upload=false: the upload is not skipped
+    assert f"FAIL the index reports {WHEEL} as yanked" in capsys.readouterr().err
+    assert sorted(p.name for p in dist.iterdir()) == [WHEEL, SDIST]
+
+
+def _check_index_cli(monkeypatch, manifest, answers):
+    """check-index --wait 600 against a sequence of index answers; sleeping is instant."""
+    answers, sleeps = list(answers), []
+    monkeypatch.setattr(gate, "fetch_json", lambda url, token=None: answers.pop(0))
+    monkeypatch.setattr(gate.time, "sleep", sleeps.append)
+    monkeypatch.setenv("PYTHON_MANIFEST", json.dumps(manifest))
+    code = gate.main(["check-index", "--index", "pypi", "--version", "0.1.0", "--wait", "600"])
+    return code, sleeps, answers
+
+
+def test_check_index_fails_at_once_on_a_yanked_release(monkeypatch, tmp_path, capsys):
+    # The upload was skipped (or the file was yanked meanwhile): verification must fail,
+    # immediately, instead of waiting for it to "propagate".
+    dist, _ = _artifacts(tmp_path)
+    manifest = gate.build_manifest(dist, "python", "0.1.0")
+    code, sleeps, _ = _check_index_cli(monkeypatch, manifest, [(200, _yanked(manifest))])
+    assert code == 1 and sleeps == []
+    assert "as yanked" in capsys.readouterr().err
+
+
+def test_check_index_waits_only_for_files_that_are_still_missing(monkeypatch, tmp_path):
+    dist, _ = _artifacts(tmp_path)
+    manifest = gate.build_manifest(dist, "python", "0.1.0")
+    answers = [(404, None), (200, _release_json(manifest, drop=SDIST)),
+               (200, _release_json(manifest))]
+    code, sleeps, left = _check_index_cli(monkeypatch, manifest, answers)
+    assert code == 0 and len(sleeps) == 2 and left == []
+
+
+@pytest.mark.parametrize("answer", ["missing-sdist", "absent", "unreachable", "complete"])
+def test_check_index_without_wait_looks_once(monkeypatch, tmp_path, capsys, answer):
+    """How the npm job checks PyPI: one look. By then PyPI has served the release to
+    smoke-pypi, so a file that is missing now is a failure, not propagation."""
+    dist, _ = _artifacts(tmp_path)
+    manifest = gate.build_manifest(dist, "python", "0.1.0")
+    calls, sleeps = [], []
+
+    def index(url, token=None):
+        calls.append(url)
+        if answer == "unreachable":
+            raise gate.GateError([f"cannot reach {url} (URLError: down)"])
+        return {"missing-sdist": (200, _release_json(manifest, drop=SDIST)),
+                "absent": (404, None),
+                "complete": (200, _release_json(manifest))}[answer]
+
+    monkeypatch.setattr(gate, "fetch_json", index)
+    monkeypatch.setattr(gate.time, "sleep", sleeps.append)
+    monkeypatch.setenv("PYTHON_MANIFEST", json.dumps(manifest))
+    code = gate.main(["check-index", "--index", "pypi", "--version", "0.1.0"])
+    assert calls == ["https://pypi.org/pypi/ragkit-dev/0.1.0/json"] and sleeps == []
+    assert code == (0 if answer == "complete" else 1)
+    if answer != "complete":
+        assert "FAIL" in capsys.readouterr().err
+
+
+def test_check_index_does_not_wait_when_a_missing_file_comes_with_a_wrong_hash(monkeypatch,
+                                                                              tmp_path):
+    dist, _ = _artifacts(tmp_path)
+    manifest = gate.build_manifest(dist, "python", "0.1.0")
+    release = _release_json(manifest, drop=SDIST, change="f" * 64)
+    code, sleeps, _ = _check_index_cli(monkeypatch, manifest, [(200, release)])
+    assert code == 1 and sleeps == []
+
+
+def _sha(manifest, name):
+    return manifest["files"][name]["sha256"]
+
+
+@pytest.mark.parametrize("entries, message", [
+    (lambda m: ["not an object", {"filename": SDIST, "digests": {"sha256": _sha(m, SDIST)}}],
+     "file entry that is not an object"),
+    (lambda m: [{"digests": {"sha256": _sha(m, WHEEL)}}], "without a file name"),
+    (lambda m: [{"filename": "", "digests": {"sha256": _sha(m, WHEEL)}}], "without a file name"),
+    (lambda m: [{"filename": 7, "digests": {"sha256": _sha(m, WHEEL)}}], "without a file name"),
+    # A mismatching entry hidden behind a matching one, in either order.
+    (lambda m: [{"filename": WHEEL, "digests": {"sha256": "f" * 64}},
+                {"filename": WHEEL, "digests": {"sha256": _sha(m, WHEEL)}},
+                {"filename": SDIST, "digests": {"sha256": _sha(m, SDIST)}}],
+     f"lists {WHEEL} more than once"),
+    (lambda m: [{"filename": WHEEL, "digests": {"sha256": _sha(m, WHEEL)}},
+                {"filename": WHEEL, "digests": {"sha256": "f" * 64}},
+                {"filename": SDIST, "digests": {"sha256": _sha(m, SDIST)}}],
+     f"lists {WHEEL} more than once"),
+])
+def test_an_ambiguous_file_list_fails_closed_in_plan_and_check(tmp_path, entries, message):
+    dist, _ = _artifacts(tmp_path)
+    manifest = gate.build_manifest(dist, "python", "0.1.0")
+    release = {"urls": entries(manifest)}
+    upload, problems = gate.python_upload_plan(manifest, 200, release)
+    assert upload == [] and any(message in p for p in problems), problems
+    assert any(message in p for p in gate.compare_index(manifest, release))
+
+
+@pytest.mark.parametrize("digests", ["sha256-of-something", ["a"], 5, None, "absent"])
+def test_digests_that_are_not_an_object_fail_closed_without_a_traceback(monkeypatch, tmp_path,
+                                                                       capsys, digests):
+    dist, _ = _artifacts(tmp_path)
+    manifest = gate.build_manifest(dist, "python", "0.1.0")
+    release = _release_json(manifest)
+    entry = next(u for u in release["urls"] if u["filename"] == WHEEL)
+    if digests == "absent":
+        del entry["digests"]
+    else:
+        entry["digests"] = digests
+    upload, problems = gate.python_upload_plan(manifest, 200, release)
+    assert upload == [] and problems == [
+        f"the index lists {WHEEL} without a digests object: "
+        f"{None if digests == 'absent' else digests!r}"]
+    assert problems[0] in gate.compare_index(manifest, release)
+    # The same answer through check-index (as the npm job runs it): an error, at once.
+    code, sleeps, _ = _check_index_cli(monkeypatch, manifest, [(200, release)])
+    err = capsys.readouterr().err
+    assert code == 1 and sleeps == [] and "without a digests object" in err
+    assert "Traceback" not in err
+
+
+@pytest.mark.parametrize("release", [None, ["not", "an", "object"], {"info": {}},
+                                     {"urls": "x"}])
+def test_compare_index_fails_closed_without_a_file_list(tmp_path, release):
+    dist, _ = _artifacts(tmp_path)
+    manifest = gate.build_manifest(dist, "python", "0.1.0")
+    assert "without a file list" in gate.compare_index(manifest, release)[0]
+
+
+def _npm_document(manifest, *versions, integrity=None, times=()):
+    document = _packument("0.0.0", *versions)
+    [(_, digests)] = manifest["files"].items()
+    for version in versions:
+        document["versions"][version] = {
+            "dist": {"integrity": integrity or f"sha512-{digests['sha512']}"}}
+    if times:
+        document["time"] = {version: "x" for version in times}
+    return document
+
+
+def test_npm_publish_plan(tmp_path):
+    _, npm = _artifacts(tmp_path)
+    manifest = gate.build_manifest(npm, "npm", "0.1.0")
+    assert gate.npm_publish_plan(manifest, 200, _npm_document(manifest), "0.1.0") == (True, [])
+    # Published by an earlier attempt whose post-check failed: do not publish again.
+    published = _npm_document(manifest, "0.1.0")
+    assert gate.npm_publish_plan(manifest, 200, published, "0.1.0") == (False, [])
+
+
+@pytest.mark.parametrize("status, kind, message", [
+    (200, "other-bytes", "already on npm from other files"),
+    (200, "unpublished", "published and then unpublished"),
+    (404, None, "refusing to publish unverified"),
+    (500, None, "refusing to publish unverified"),
+    (200, "not-an-object", "refusing to publish unverified"),
+])
+def test_npm_publish_plan_fails_closed(tmp_path, status, kind, message):
+    _, npm = _artifacts(tmp_path)
+    manifest = gate.build_manifest(npm, "npm", "0.1.0")
+    document = {
+        "other-bytes": _npm_document(manifest, "0.1.0", integrity="sha512-other"),
+        "unpublished": _npm_document(manifest, times=("0.0.0", "0.1.0")),
+        "not-an-object": ["not", "an", "object"],
+    }.get(kind)
+    publish, problems = gate.npm_publish_plan(manifest, status, document, "0.1.0")
+    assert publish is False and len(problems) == 1 and message in problems[0]
+
+
+def test_npm_publish_plan_cli(monkeypatch, tmp_path):
+    _, npm = _artifacts(tmp_path)
+    manifest = gate.build_manifest(npm, "npm", "0.1.0")
+    monkeypatch.setenv("NPM_MANIFEST", json.dumps(manifest))
+    out = tmp_path / "github_output"
+    for document, expected in ((_npm_document(manifest), "publish=true\n"),
+                               (_npm_document(manifest, "0.1.0"), "publish=false\n")):
+        monkeypatch.setattr(gate, "fetch_json", lambda url, token=None, d=document: (200, d))
+        assert gate.main(["--github-output", str(out), "npm-publish-plan",
+                          "--version", "0.1.0"]) == 0
+        assert out.read_text(encoding="utf-8") == expected
+        out.unlink()
+    monkeypatch.setattr(gate, "fetch_json", lambda url, token=None: (503, None))
+    assert gate.main(["--github-output", str(out), "npm-publish-plan", "--version", "0.1.0"]) == 1
+    assert not out.exists()
 
 
 # --- R3: environment protection ----------------------------------------------------------
