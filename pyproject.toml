@@ -30,7 +30,7 @@ dependencies = [
     "langchain-text-splitters>=1.1,<2",
     "langchain-qdrant>=1.1,<2",
     "qdrant-client>=1.19,<2",
-    "pymupdf>=1.28,<2",
+    "pymupdf>=1.28,<3",
     "python-dotenv>=1.2,<2",
     "packaging>=24",
 ]
