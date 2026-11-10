@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.1 (2026-11-10)
+
+Release fix only; the `ragkit-dev` package code is the same as 0.1.0.
+
+- **npm:** `rag-kit-dev` 0.1.1 is the first generator release on npm. Its 0.1.0
+  was never published: the release workflow passed the tarball to `npm publish`
+  as `dist-npm/…tgz`, which npm reads as a GitHub `owner/repo` shorthand; it now
+  passes `./dist-npm/…tgz`. Use `npx rag-kit-dev@latest` (0.1.1 or later).
+- **PyPI:** `ragkit-dev` 0.1.0 is published and stays valid; 0.1.1 is released
+  alongside it because the generator pins `ragkit-dev==<its own version>`.
+
 ## 0.1.0rc1 (release candidate)
 
 Release candidate for 0.1.0, used to rehearse the release on TestPyPI. It
