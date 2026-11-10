@@ -6,6 +6,7 @@ import { PassThrough } from "node:stream";
 import { after, test } from "node:test";
 
 import { main } from "../lib/cli.js";
+import { RAG_KIT_VERSION } from "../lib/version.js";
 
 const work = await mkdtemp(path.join(tmpdir(), "rag-kit-dev-cli-"));
 after(() => rm(work, { recursive: true, force: true }));
@@ -173,7 +174,9 @@ test("--package-spec installs the given wheel and notes the pin", async () => {
   const result = await generate(["from-wheel", "--embeddings", "gemini", "--package-spec", "C:\\dist\\rag_kit.whl"], { run });
   assert.equal(result.code, 0, result.err);
   assert.ok(calls.some((c) => c.args.join(" ").endsWith("C:\\dist\\rag_kit.whl[gemini]")));
-  assert.match(result.out, /requirements\.txt pins ragkit-dev\[gemini\]==0\.1\.0/);
+  // The pin is the generator's own version (package.json), so this follows version bumps.
+  assert.ok(result.out.includes(`requirements.txt pins ragkit-dev[gemini]==${RAG_KIT_VERSION} `),
+    result.out);
 });
 
 test("a relative --package-spec path is taken from the folder the command runs in", async () => {
