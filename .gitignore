@@ -20,9 +20,36 @@ uploads/
 data/*
 !data/.gitkeep
 
+# ---- Documents (books, PDFs): never commit them; keep them in data/ ----
+*.pdf
+
 # ---- Personal / scratch ----
+check.txt
 linkdin.txt
 fix.txt
+fix1.txt
+fix2.txt
+fix3.txt
+fix4.txt
+fix5.txt
+fix6.txt
+fix7.txt
+fix8.txt
+fix9.txt
+fix10.txt  
+fix11.txt
+fix12.txt
+fix13.txt
+fix14.txt
+fix15.txt
+fix16.txt
+fix17.txt
+fix18.txt
+fix19.txt
+fix20.txt
+portfolio.txt
+work.txt
+check.txt
 
 # ---- Editors / OS ----
 .vs/

@@ -1,6 +1,6 @@
 """Font-encoding repair for PDFs with broken glyph maps.
 
-Some PDFs (this project's `-Free-English-Grammar.pdf` among them - watermarked by
+Some PDFs (the `-Free-English-Grammar.pdf` this was written for among them - watermarked by
 pdforall.com) embed subset fonts with *no* ToUnicode CMap. Every PDF text
 extractor - pypdf and PyMuPDF alike - then returns the raw glyph indices, which
 come out as `& ? ! & & ? !` garbage.

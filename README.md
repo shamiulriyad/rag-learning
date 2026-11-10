@@ -1,5 +1,11 @@
 # rag-kit
 
+[![PyPI](https://img.shields.io/pypi/v/ragkit-dev)](https://pypi.org/project/ragkit-dev/)
+[![Python](https://img.shields.io/pypi/pyversions/ragkit-dev)](https://pypi.org/project/ragkit-dev/)
+[![npm](https://img.shields.io/npm/v/rag-kit-dev)](https://www.npmjs.com/package/rag-kit-dev)
+[![CI](https://github.com/shamiulriyad/rag-learning/actions/workflows/ci.yml/badge.svg)](https://github.com/shamiulriyad/rag-learning/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](https://github.com/shamiulriyad/rag-learning/blob/main/LICENSE)
+
 A reusable, developer-focused RAG toolkit for document ingestion, retrieval,
 and source-grounded answers. Index PDF, text and Markdown files into Qdrant,
 then ask questions and get answers that cite the chunks (and PDF page numbers)
@@ -12,9 +18,10 @@ test UI.
 
 ![Pipeline: ingest (load, extract, clean, chunk, embed, store in Qdrant) and query (question, embed, retrieve, Gemini, answer with sources); CLI, FastAPI and Streamlit all call the same Pipeline](https://raw.githubusercontent.com/shamiulriyad/rag-learning/main/docs/architecture.svg)
 
-> **Names:** the Python package is `ragkit-dev` (you `import rag_kit` and run
-> `rag-kit`); the project generator is the npm package `rag-kit-dev`. Version
-> 0.1.0. Upgrading from the script-based version? See
+> **Names:** the Python package is [`ragkit-dev` on PyPI](https://pypi.org/project/ragkit-dev/)
+> (you `import rag_kit` and run `rag-kit`); the project generator is
+> [`rag-kit-dev` on npm](https://www.npmjs.com/package/rag-kit-dev). Both always
+> share one version. Upgrading from the script-based version? See
 > [CHANGELOG.md](https://github.com/shamiulriyad/rag-learning/blob/main/CHANGELOG.md) for the old-to-new command table.
 
 ## Start a new project
@@ -24,17 +31,36 @@ creates a project folder (settings template, `data/`, an example) and a `.venv`
 with rag-kit installed. It explains the local-vs-Gemini embedding choice before
 installing anything and never creates `.env` or asks for an API key.
 
+You need Node.js 20+ and Python 3.11 or 3.12.
+
 ```bash
-npx rag-kit-dev my-rag
+npx rag-kit-dev@latest my-rag                      # asks: local or Gemini embeddings
+npx rag-kit-dev@latest my-rag --embeddings gemini  # small install, no PyTorch
 ```
+
+Then, inside the new project (PowerShell; macOS/Linux commands in comments):
+
+```powershell
+cd my-rag
+Copy-Item .env.example .env          # macOS/Linux: cp .env.example .env
+# open .env and set GOOGLE_API_KEY; never commit .env
+.venv\Scripts\Activate.ps1           # macOS/Linux: source .venv/bin/activate
+rag-kit check                        # settings, dependencies, vector store
+rag-kit ingest data/your-document.pdf
+rag-kit ask "your question"
+```
+
+The generator's options (`--no-install`, `--python`, `--no-uv`, `--gpu`, …)
+are listed in its [README](https://github.com/shamiulriyad/rag-learning/blob/main/generator/README.md).
 
 To try an unreleased build instead (testing only), build the wheel in a
 checkout and point the generator at it. The `--package-spec` path is relative
-to the folder you run the command in:
+to the folder you run the command in; replace `<version>` with the version in
+`pyproject.toml`:
 
 ```bash
 uv build --out-dir dist
-node generator/bin/rag-kit-dev.js my-rag --embeddings gemini --package-spec dist/ragkit_dev-0.1.0-py3-none-any.whl
+node generator/bin/rag-kit-dev.js my-rag --embeddings gemini --package-spec dist/ragkit_dev-<version>-py3-none-any.whl
 ```
 
 ## What it does
@@ -78,6 +104,8 @@ pip install "ragkit-dev[local,gemini]"   # local embeddings + Gemini answers
 The package is named `ragkit-dev`; `pip install ragkit` installs a different,
 unrelated project. `pip install ragkit-dev` alone gives the core (enough for
 `rag-kit check`); add extras in brackets, e.g. `pip install "ragkit-dev[gemini,api]"`.
+Upgrade with `pip install -U "ragkit-dev[local,gemini]"` (same extras); check
+the installed version with `pip show ragkit-dev`.
 
 **From a checkout (development):** to work on the code or test unreleased
 changes, install the repository in editable mode instead. Wherever this README
@@ -337,8 +365,8 @@ on its own; call `rag_kit.log.show_progress()` (as the CLI does) or configure
 Some PDFs embed subset fonts without a `ToUnicode` map, and every extractor
 returns scrambled glyphs (`& ? ! & &`).
 [`pdf_font_repair.py`](https://github.com/shamiulriyad/rag-learning/blob/main/src/rag_kit/pdf_font_repair.py) reverses that
-substitution for the `-Free-English-Grammar.pdf` kept in this repository (it
-is not part of any package). It is off by default; enable it with
+substitution for one specific book, `-Free-English-Grammar.pdf` (not included
+in this repository or any package; bring your own copy). It is off by default; enable it with
 `PDF_FONT_REPAIR=true` or `--font-repair on`. Its maps are specific to that
 PDF; for other broken PDFs, use OCR instead.
 
