@@ -20,10 +20,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # npmjs.com answers automated requests with 403 (bot protection), so its
+      # package page is not checked; the npm badge (shields.io) still is.
       - uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
         with:
           args: >-
             --no-progress --max-retries 3 --exclude-loopback
+            --exclude '^https://www\.npmjs\.com/'
             README.md generator/README.md generator/templates/default/README.md
             docs/pipeline.md CHANGELOG.md RELEASING.md
           fail: true

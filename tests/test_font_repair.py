@@ -61,7 +61,8 @@ def test_readability_score():
     assert not is_readable("& ? ! & & ? ! & & ? ! # # %")
 
 
-@pytest.mark.skipif(not GRAMMAR_PDF.exists(), reason="tracked grammar PDF not present")
+@pytest.mark.skipif(not GRAMMAR_PDF.exists(),
+                    reason="-Free-English-Grammar.pdf not in the checkout root (not tracked)")
 def test_repairs_a_real_page_of_the_grammar_pdf():
     import pymupdf
 
