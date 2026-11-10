@@ -233,7 +233,10 @@ def test_npm_publish_is_the_verified_file_without_scripts(release):
     run = next(s["run"] for s in release["jobs"]["publish-npm"]["steps"]
                if "npm publish" in s.get("run", ""))
     assert "--ignore-scripts" in run and "--provenance" in run and "--access public" in run
-    assert "rag-kit-dev-${NPM_VERSION}.tgz" in run
+    # npm reads a bare "dir/file.tgz" as the GitHub shorthand owner/repo and tries
+    # `git ls-remote ssh://git@github.com/dir/file.tgz.git` (0.1.0's npm publish failed
+    # that way); only a path starting with ./ is a local tarball.
+    assert '"./dist-npm/rag-kit-dev-${NPM_VERSION}.tgz"' in run
 
 
 # --- R3 and permissions -------------------------------------------------------------------

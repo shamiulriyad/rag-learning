@@ -353,7 +353,7 @@ jobs:
         if: steps.plan.outputs.publish == 'true'
         env:
           NPM_VERSION: ${{ needs.verify.outputs.npm-version }}
-        run: npm publish --provenance --access public --ignore-scripts "dist-npm/rag-kit-dev-${NPM_VERSION}.tgz"
+        run: npm publish --provenance --access public --ignore-scripts "./dist-npm/rag-kit-dev-${NPM_VERSION}.tgz"
       - name: npm reports exactly the trusted build's integrity
         env:
           NPM_MANIFEST: ${{ needs.ci.outputs.npm-manifest }}
