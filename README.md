@@ -6,330 +6,203 @@
 [![CI](https://github.com/shamiulriyad/rag-learning/actions/workflows/ci.yml/badge.svg)](https://github.com/shamiulriyad/rag-learning/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](https://github.com/shamiulriyad/rag-learning/blob/main/LICENSE)
 
-A reusable, developer-focused RAG toolkit for document ingestion, retrieval,
-and source-grounded answers. Index PDF, text and Markdown files into Qdrant,
-then ask questions and get answers that cite the chunks (and PDF page numbers)
-they came from.
+**Ask questions about your own PDFs and notes, and get answers that show which
+page they came from.**
 
-Every pipeline step is its own module under [`src/rag_kit/`](https://github.com/shamiulriyad/rag-learning/tree/main/src/rag_kit), so
-you can read, test and swap each one. Use it from the `rag-kit` command, from
-Python, through an optional FastAPI service, or through an optional Streamlit
-test UI.
+rag-kit is a small RAG toolkit for Python. You give it documents (PDF, `.txt`
+or `.md`). It splits them into chunks and stores them in a vector database
+(Qdrant). When you ask a question, it finds the chunks that match best, and
+Gemini writes an answer from those chunks only. Each claim in the answer is
+tagged `[S1]`, `[S2]`… so you can check it against the source.
+
+> **New to RAG?** RAG (retrieval-augmented generation) means the AI first
+> *looks up* the relevant parts of your documents, then *writes* the answer
+> from them. It answers from your files instead of from memory, and it tells
+> you when your files don't contain the answer.
+
+**Contents:** [Example](#example) · [How it works](#how-it-works) ·
+[Quick start](#quick-start) · [Commands](#commands) ·
+[Browser UI, Python and API](#browser-ui-python-and-api) ·
+[Install with pip](#install-with-pip) · [Settings](#settings) ·
+[Troubleshooting](#troubleshooting)
+
+## Example
+
+A 296-page programming book, indexed and then asked a question (output
+shortened):
+
+```text
+$ rag-kit ingest data/book.pdf
+[2] Extracted  : 296 pages, 410,128 characters
+[4] Chunked    : 620 chunks (size=1000, overlap=150)
+[6] Qdrant     : collection 'pdf_rag' now holds 620 vectors
+
+$ rag-kit ask "What is dynamic programming and when should it be used?"
+Dynamic programming is a technique that combines the correctness of complete
+search and the efficiency of greedy algorithms [S1]. It can be applied if a
+problem can be divided into overlapping subproblems that can be solved
+independently [S1].
+
+Sources:
+  [S1] book.pdf, page 75   (score 0.731)
+  [S2] book.pdf, page 144  (score 0.668)
+```
+
+## How it works
 
 ![Pipeline: ingest (load, extract, clean, chunk, embed, store in Qdrant) and query (question, embed, retrieve, Gemini, answer with sources); CLI, FastAPI and Streamlit all call the same Pipeline](https://raw.githubusercontent.com/shamiulriyad/rag-learning/main/docs/architecture.svg)
 
-> **Names:** the Python package is [`ragkit-dev` on PyPI](https://pypi.org/project/ragkit-dev/)
-> (you `import rag_kit` and run `rag-kit`); the project generator is
-> [`rag-kit-dev` on npm](https://www.npmjs.com/package/rag-kit-dev). Both always
-> share one version. Upgrading from the script-based version? See
-> [CHANGELOG.md](https://github.com/shamiulriyad/rag-learning/blob/main/CHANGELOG.md) for the old-to-new command table.
+There are two phases:
 
-## Start a new project
+1. **Ingest**, once per document: load the file → extract the text page by
+   page → clean it → split it into overlapping chunks → turn each chunk into a
+   vector (embedding) → store the vectors in Qdrant.
+2. **Ask**, for every question: turn the question into a vector → find the
+   closest chunks → Gemini answers from those chunks only → you get the
+   answer plus its sources.
 
-`rag-kit-dev`, the npm package in [`generator/`](https://github.com/shamiulriyad/rag-learning/tree/main/generator),
-creates a project folder (settings template, `data/`, an example) and a `.venv`
-with rag-kit installed. It explains the local-vs-Gemini embedding choice before
-installing anything and never creates `.env` or asks for an API key.
+Each step is its own short module in
+[`src/rag_kit/`](https://github.com/shamiulriyad/rag-learning/tree/main/src/rag_kit),
+so you can read, test or replace any one of them.
+[`pipeline.py`](https://github.com/shamiulriyad/rag-learning/blob/main/src/rag_kit/pipeline.py)
+connects them, and the command line, the browser UI and the API all use it.
 
-You need Node.js 20+ and Python 3.11 or 3.12.
+<details>
+<summary>Where each step lives in the code</summary>
+
+| Step | Module | What it does |
+| ---- | ------ | ------------ |
+| 1 Load | `step01_load_pdf.py` | accepts `.pdf`, `.txt`, `.md`; checks the file before any work |
+| 2 Extract | `step02_extract_text.py` | one document per PDF page; optional font repair |
+| 3 Clean | `step03_clean_text.py` | rejoins broken lines and hyphenated words, drops repeating headers and footers |
+| 4 Chunk | `step04_chunking.py` | recursive splitter with overlap; a `chunk_id` per document |
+| 5 Embed | `step05_embedding.py` | local Hugging Face model (default `BAAI/bge-m3`) or Gemini |
+| 6 Store | `step06_vector_store.py` | Qdrant, either a folder on disk or a server |
+| 7 Question | CLI, API or UI | where the question comes from |
+| 8–9 Retrieve | `step08_query_embedding.py`, `step09_retrieve.py` | cosine search, optional minimum score |
+| 10 Generate | `step10_generate.py` | Gemini answers from the context only and tags claims `[S1]`, `[S2]`… |
+| 11 Answer | `step11_answer.py` | the answer plus the source behind each tag |
+
+More detail per step: [docs/pipeline.md](https://github.com/shamiulriyad/rag-learning/blob/main/docs/pipeline.md).
+
+</details>
+
+## Quick start
+
+**You need:** Node.js 20 or newer, Python 3.11 or 3.12, and a free
+[Gemini API key](https://aistudio.google.com/app/apikey).
+
+**1. Create a project.** The `rag-kit-dev` generator makes a folder with a
+settings template, a `data/` folder and a Python environment with rag-kit
+installed.
 
 ```bash
-npx rag-kit-dev@latest my-rag                      # asks: local or Gemini embeddings
-npx rag-kit-dev@latest my-rag --embeddings gemini  # small install, no PyTorch
+npx rag-kit-dev@latest my-rag
 ```
 
-Then, inside the new project (PowerShell; macOS/Linux commands in comments):
+It asks how to create embeddings:
 
-```powershell
+| Choice | Install size | Indexing cost |
+| ------ | ------------ | ------------- |
+| **local** (default) | large: PyTorch plus a 2.2 GB model, downloaded on first use | free, works offline |
+| **gemini** | small, no PyTorch | uses your Gemini quota |
+
+To skip the question, add `--embeddings gemini` (or `--embeddings local`).
+Other options (`--no-install`, `--python`, `--gpu`, …) are in the
+[generator README](https://github.com/shamiulriyad/rag-learning/blob/main/generator/README.md).
+
+**2. Add your API key.**
+
+```bash
 cd my-rag
 Copy-Item .env.example .env          # macOS/Linux: cp .env.example .env
-# open .env and set GOOGLE_API_KEY; never commit .env
+```
+
+Open `.env` and set `GOOGLE_API_KEY=your-key`. Never commit `.env`.
+
+**3. Activate the environment and check the setup.**
+
+```bash
 .venv\Scripts\Activate.ps1           # macOS/Linux: source .venv/bin/activate
-rag-kit check                        # settings, dependencies, vector store
+rag-kit check
+```
+
+**4. Add a document and ask.** Copy a PDF into `data/`, then:
+
+```bash
 rag-kit ingest data/your-document.pdf
 rag-kit ask "your question"
 ```
 
-The generator's options (`--no-install`, `--python`, `--no-uv`, `--gpu`, …)
-are listed in its [README](https://github.com/shamiulriyad/rag-learning/blob/main/generator/README.md).
+With local embeddings, the first ingest downloads the model once. Indexing a
+300-page book took about 10 minutes on a laptop CPU.
 
-To try an unreleased build instead (testing only), build the wheel in a
-checkout and point the generator at it. The `--package-spec` path is relative
-to the folder you run the command in; replace `<version>` with the version in
-`pyproject.toml`:
+## Commands
 
-```bash
-uv build --out-dir dist
-node generator/bin/rag-kit-dev.js my-rag --embeddings gemini --package-spec dist/ragkit_dev-<version>-py3-none-any.whl
-```
+| Command | What it does |
+| ------- | ------------ |
+| `rag-kit check` | checks settings, installed packages and the vector store (`--deep` also loads the model) |
+| `rag-kit ingest FILE …` | adds documents; adding a file again replaces its old chunks |
+| `rag-kit ask "question"` | answers with sources; without a question it starts an interactive session |
+| `rag-kit search "question"` | shows the matching chunks only, with no AI call |
+| `rag-kit documents` | lists the indexed files and their chunk counts |
+| `rag-kit delete FILE` | removes one file's chunks (asks first; `-y` skips the question) |
+| `rag-kit ui` | opens the browser UI at http://localhost:8501 |
+| `rag-kit serve` | starts the HTTP API at http://localhost:8000 |
 
-## What it does
-
-| Step | Module | Notes |
-| ---- | ------ | ----- |
-| 1 Load | `step01_load_pdf.py` | `.pdf`, `.txt`, `.md`; validates before any work |
-| 2 Extract | `step02_extract_text.py` | one Document per PDF page; optional font repair |
-| 3 Clean | `step03_clean_text.py` | unwrap lines, join hyphenation, drop headers/footers |
-| 4 Chunk | `step04_chunking.py` | recursive splitter, overlap, `chunk_id` per document |
-| 5 Embed | `step05_embedding.py` | local Hugging Face model (default `BAAI/bge-m3`) or Gemini |
-| 6 Store | `step06_vector_store.py` | Qdrant, embedded on disk or a server |
-| 8–9 Retrieve | `step08`, `step09` | cosine search, optional minimum score |
-| 10 Generate | `step10_generate.py` | Gemini, context-only, tags claims `[S1]`, `[S2]`… |
-| 11 Answer | `step11_answer.py` | answer plus the sources behind each marker |
-
-Step 7 (the question) comes from the CLI, the API or the UI.
-[`pipeline.py`](https://github.com/shamiulriyad/rag-learning/blob/main/src/rag_kit/pipeline.py) wires the steps together; the CLI,
-API and UI all use it. See [docs/pipeline.md](https://github.com/shamiulriyad/rag-learning/blob/main/docs/pipeline.md) for per-step
-notes.
-
-## Prerequisites
-
-- **Python 3.11 or 3.12** (the package refuses other versions for now).
-- A **Gemini API key** for answer generation
-  ([get one](https://aistudio.google.com/app/apikey)). Ingestion and retrieval
-  with the default local embeddings need no key.
-- For local embeddings: disk space for PyTorch and the model. `BAAI/bge-m3` is
-  about 2.2 GB and is downloaded to the Hugging Face cache on first use.
-- Optional: Docker, if you prefer a Qdrant server to the embedded store.
-
-## Install
+Every command accepts `--project DIR` and `--collection NAME`.
 
 ```bash
-py -3.11 -m venv .venv            # macOS/Linux: python3.11 -m venv .venv
-.venv\Scripts\activate            # macOS/Linux: source .venv/bin/activate
-python -m pip install -U pip
-pip install "ragkit-dev[local,gemini]"   # local embeddings + Gemini answers
-```
-
-The package is named `ragkit-dev`; `pip install ragkit` installs a different,
-unrelated project. `pip install ragkit-dev` alone gives the core (enough for
-`rag-kit check`); add extras in brackets, e.g. `pip install "ragkit-dev[gemini,api]"`.
-Upgrade with `pip install -U "ragkit-dev[local,gemini]"` (same extras); check
-the installed version with `pip show ragkit-dev`.
-
-**From a checkout (development):** to work on the code or test unreleased
-changes, install the repository in editable mode instead. Wherever this README
-says `pip install "ragkit-dev[...]"`, use `pip install -e ".[...]"` from the
-checkout:
-
-```bash
-git clone https://github.com/shamiulriyad/rag-learning.git
-cd rag-learning
-pip install -e ".[local,gemini]"
-```
-
-Choose extras for what you need:
-
-| Extra | Adds | Needed for |
-| ----- | ---- | ---------- |
-| *(none)* | LangChain core, Qdrant, PyMuPDF | ingestion/retrieval plumbing, `rag-kit check` |
-| `local` | sentence-transformers (pulls in PyTorch) | `EMBEDDING_PROVIDER=huggingface` (default) |
-| `gemini` | langchain-google-genai | answers, and `EMBEDDING_PROVIDER=google` |
-| `api` | FastAPI, uvicorn | `rag-kit serve` |
-| `ui` | Streamlit | `rag-kit ui` |
-| `dev` | pytest, httpx, ruff (+ `api`) | running the tests |
-| `all` | `local`, `gemini`, `api`, `ui` | everything |
-
-**Linux and CPU-only PyTorch (recommended):** on Linux, PyTorch from PyPI
-pulls in CUDA libraries (several GB). For CPU-only local embeddings, install
-the CPU build from PyTorch's own index **first**, in the same virtual
-environment, then rag-kit:
-
-```bash
-pip install torch --index-url https://download.pytorch.org/whl/cpu
-pip install "ragkit-dev[local,gemini]"     # keeps the CPU torch that is installed
-
-# with uv instead of pip:
-uv pip install torch --index-url https://download.pytorch.org/whl/cpu
-uv pip install "ragkit-dev[local,gemini]"
-```
-
-From a checkout, the second command is `pip install -e ".[local,gemini]"`
-(`uv pip install -e ".[local,gemini]"`).
-
-This works on x86_64 and aarch64 Linux with Python 3.11 and 3.12. Later
-`pip install -U "ragkit-dev[local]"` keeps the CPU build as long as it satisfies
-the requirement; upgrading torch itself (`pip install -U torch`) without the
-`--index-url` above would switch to the CUDA build. If a CUDA build is already
-installed, start from a fresh virtual environment: reinstalling torch over it
-leaves the `nvidia-*` packages behind. With an NVIDIA GPU you want to use,
-skip the first command.
-
-On Windows and macOS, PyTorch from PyPI does not pull in CUDA libraries, so no
-extra step is needed.
-
-## Set up a project
-
-A project is a folder with a `rag-kit.toml` marker file. It holds your `.env`,
-your documents and the embedded Qdrant store; nothing is ever written inside
-the installed package. This repository is itself a project.
-
-```bash
-mkdir my-rag && cd my-rag
-# create the marker (its contents are reserved; an empty file is fine)
-echo "# rag-kit project" > rag-kit.toml
-# copy .env.example from this repository to my-rag/.env, then set GOOGLE_API_KEY
-rag-kit check                      # settings, dependencies, vector store
-rag-kit check --deep               # also loads the embedding model, compares dimensions
-```
-
-Commands find the project like this:
-
-1. `--project DIR` (any command; no marker needed),
-2. else the `RAG_PROJECT_DIR` environment variable,
-3. else the nearest folder at or above the current directory that contains
-   `rag-kit.toml`.
-
-If none applies, the command stops with an error instead of creating a store
-somewhere unexpected. Relative paths in `.env` (`QDRANT_PATH`, `PDF_PATH`) are
-resolved from the project folder, so commands behave the same from any
-subfolder.
-
-## Configure
-
-Settings come from the project's `.env` (or the file named by `RAG_ENV_FILE`).
-Environment variables win over `.env`, and command-line flags such as
-`--collection`, `-k` and `--min-score` win over both.
-
-| Variable | Default | Purpose |
-| -------- | ------- | ------- |
-| `GOOGLE_API_KEY` | – | Gemini key (generation; embeddings if provider is `google`) |
-| `LLM_MODEL` | `gemini-2.5-flash` | Gemini model for answers |
-| `TEMPERATURE` | `0.2` | LLM temperature |
-| `EMBEDDING_PROVIDER` | `huggingface` | `huggingface` (local) or `google` |
-| `EMBEDDING_MODEL` | `BAAI/bge-m3` | 1024-dim; `models/gemini-embedding-001` for `google` |
-| `EMBEDDING_DIM` | auto | set only to skip auto-detection |
-| `QDRANT_PATH` | – | embedded store folder, e.g. `qdrant_data` (wins over URL) |
-| `QDRANT_URL` / `QDRANT_API_KEY` | `http://localhost:6333` | Qdrant server |
-| `COLLECTION_NAME` | `pdf_rag` | collection to read and write |
-| `PDF_PATH` | `data/sample.pdf` | file for `ingest` with no arguments |
-| `PDF_FONT_REPAIR` | `false` | repair scrambled-glyph PDFs (see below) |
-| `CHUNK_SIZE` / `CHUNK_OVERLAP` | `1000` / `150` | chunking |
-| `TOP_K` | `4` | chunks per question |
-| `MIN_SCORE` | – | drop chunks below this cosine score |
-| `EMBED_BATCH_SIZE` / `EMBED_SLEEP` | `90` / `0` (`60` for google) | ingestion batching |
-| `RAG_PROJECT_DIR` | – | project folder (environment only) |
-| `RAG_ENV_FILE` | `<project>/.env` | use another settings file (environment only) |
-| `RAG_EXPORT_ENV` | – | extra `.env` names to export, comma-separated (see below) |
-
-Without `QDRANT_PATH`, rag-kit connects to a Qdrant server at `QDRANT_URL`.
-A collection is tied to the embedding model that built it. If the model's
-dimension does not match the collection, every command stops with an error
-instead of writing incompatible vectors.
-
-### Variables for other libraries (`HF_HOME`, proxies)
-
-Some libraries read only the process environment: Hugging Face reads `HF_HOME`
-when it is first imported, and HTTP clients read proxy variables. So that
-these can live in `.env` too, the `rag-kit` command, `rag-kit serve` (the
-default `rag_kit.api:app`) and `rag-kit ui` copy an **allow-list** of `.env`
-keys into the environment at startup:
-
-- `HF_*`, `HUGGINGFACE_*`, `TRANSFORMERS_*`, `SENTENCE_TRANSFORMERS_*`, `TORCH_*`,
-  `TOKENIZERS_PARALLELISM`, `CUDA_VISIBLE_DEVICES`, `OMP_NUM_THREADS`
-- `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, `ALL_PROXY` (either case),
-  `REQUESTS_CA_BUNDLE`, `SSL_CERT_FILE`, `SSL_CERT_DIR`, `CURL_CA_BUNDLE`
-- any names you list in `RAG_EXPORT_ENV=NAME1,NAME2`
-
-rag-kit's own settings, including `GOOGLE_API_KEY` and `QDRANT_API_KEY`, and
-any `RAG_*` variable are **never** exported, even if listed. Variables already
-set in the environment win, empty values are skipped, and only names are ever
-printed (`rag-kit check` lists them). `HF_TOKEN` is a secret but is exported,
-because Hugging Face reads it only from the environment.
-
-Importing `rag_kit`, building a `Pipeline` or calling `Settings.load()` never
-changes the environment. In your own program, call
-`rag_kit.env.export_env_file(settings)` before the first local embedding is
-created if you want the same behaviour.
-
-## Ingest documents
-
-```bash
-rag-kit ingest data/book.pdf notes.md      # several files at once
-rag-kit ingest                             # PDF_PATH from .env
-rag-kit ingest report.pdf --collection experiments
-rag-kit ingest scanned-font.pdf --font-repair on
-rag-kit ingest --project ~/my-rag report.pdf
-```
-
-- **Re-ingesting replaces.** Chunks get IDs derived from file name, content
-  hash and position. Ingesting a file again overwrites its chunks and removes
-  any older ones with the same file name, so nothing is duplicated. Two
-  different files with the same name in one collection count as one document.
-- **Delete one document:** `rag-kit delete report.pdf` (asks first; `-y` to skip).
-- **List documents:** `rag-kit documents`, or `--json` for
-  `{"collection": str, "total_chunks": int, "documents": [{"file": str, "chunks": int}]}`
-  (stable schema; files sorted by name).
-- **Start over:** `rag-kit ingest file.pdf --recreate` drops the whole
-  collection first. Needed after changing the embedding model.
-- **File names starting with `-`** look like options to the CLI. Write
-  `./-name.pdf`, or put `--` before the files:
-  `rag-kit ingest --font-repair on -- -Free-English-Grammar.pdf`.
-
-## Ask questions
-
-```bash
-rag-kit ask "What is a countable noun?"
-rag-kit ask                                  # interactive, 'exit' to quit
+rag-kit ingest data/book.pdf notes.md        # several files at once
+rag-kit ingest                               # the file named in PDF_PATH
+rag-kit ingest report.pdf --collection test  # a separate collection
+rag-kit ingest book.pdf --recreate           # empty the collection first
 rag-kit ask "..." --show-chunks              # also print each chunk in full
-rag-kit ask "..." --json                     # machine-readable
+rag-kit ask "..." -k 8 --min-score 0.5       # more chunks, drop weak matches
+rag-kit ask "..." --json                     # machine-readable output
+rag-kit search "..." --full                  # full chunk text, no AI call
+rag-kit documents --json
 ```
 
-The answer is printed with its `[S1]`… markers followed by the sources, each
-with file, page (PDFs only) and similarity score. If nothing is retrieved (or
-nothing passes `--min-score`), the LLM is not called and the status is
-`no_results`.
+**Tip: ask specific questions.** Each answer is built from only the top few
+chunks (`TOP_K`, 4 by default). "What is a segment tree?" works well. "Summarize
+chapter 1" doesn't, because a whole chapter is spread over dozens of chunks.
 
-## Inspect retrieval
+<details>
+<summary>More about ingesting</summary>
 
-```bash
-rag-kit search "What is a countable noun?" -k 8          # no LLM call
-rag-kit search "..." --full                               # whole chunk text
-rag-kit search "..." --json                               # scores + metadata
-```
+- **Adding a file again replaces it.** Chunk IDs come from the file name,
+  content and position, so ingesting a file again overwrites its chunks and
+  removes older ones with the same name. Nothing is duplicated. Two different
+  files with the same name in one collection count as one document.
+- **Changed the embedding model?** Use `--recreate` or another collection.
+  A collection only works with the model that built it, and rag-kit stops with
+  an error instead of mixing them.
+- **File names that start with `-`** look like options. Write `./-name.pdf`,
+  or put `--` before the files: `rag-kit ingest --font-repair on -- -name.pdf`.
+- `rag-kit documents --json` prints
+  `{"collection": str, "total_chunks": int, "documents": [{"file": str, "chunks": int}]}`,
+  with files sorted by name.
+- `rag-kit search --json` and `rag-kit ask --json` write progress to stderr,
+  so stdout holds only the JSON.
 
-Each hit shows score, file, page, `chunk_id` and `doc_id`. With `--json`, step
-progress goes to stderr and stdout holds only the JSON.
+</details>
 
-## Optional FastAPI service
+## Browser UI, Python and API
 
-```bash
-pip install "ragkit-dev[api]"         # from a checkout: pip install -e ".[api]"
-rag-kit serve --port 8000            # or: uvicorn rag_kit.api:app --port 8000
-rag-kit serve --collection experiments
-```
-
-`--collection` (also on `ui`) applies to that server process only; without it
-the server uses `COLLECTION_NAME`. The command prints which collection it uses,
-passes the project to the server in `RAG_PROJECT_DIR`, and never modifies
-`.env`. When you start uvicorn yourself, run it inside the project or set
-`RAG_PROJECT_DIR`.
-
-- `GET /health` → `{"status": "ok", "ready": true}`
-- `POST /query` with `{"question": "...", "top_k": 4}` →
-  `{"answer": "...", "status": "answered" | "no_results", "sources": [{"page", "source", "score", "marker", "chunk_id", "text"}]}`
-
-`answer` has the markers stripped; `marker` on each source maps them back.
-Pipeline failures (including a missing project) return 503 with the reason.
-Questions longer than 4000 characters are rejected with 422.
-
-The service has no authentication and binds to `127.0.0.1` by default; do not
-expose it publicly. To embed it elsewhere, build your own instance with
-`rag_kit.api.create_app(settings=..., pipeline=...)`.
-
-## Optional Streamlit test UI
+### Browser UI
 
 ```bash
-pip install "ragkit-dev[ui]"          # from a checkout: pip install -e ".[ui]"
+pip install "ragkit-dev[ui]"
 rag-kit ui                           # http://localhost:8501
 ```
 
-Upload and ingest documents, ask questions or run retrieval only, and inspect
-scores, pages, chunk text and metadata. Uploads are saved under the project's
-`uploads/` folder (git-ignored here). It is a testing tool, not a production
+Upload documents, ask questions or run retrieval only, and inspect the
+scores, pages and text of the chunks behind each answer. Uploads are saved in
+the project's `uploads/` folder. It is a tool for testing, not a production
 front end.
 
-## Use from Python
+### Python
 
 ```python
 from rag_kit import Pipeline, Settings
@@ -344,35 +217,249 @@ for source in result.sources:
 pipeline.close()
 ```
 
-`Settings.load()` without a folder finds the project the same way the CLI
-does. Override values with `settings.replace(top_k=8)`. `Settings.load` does
-not change `os.environ`, and API keys are left out of its `repr`.
+- `Settings.load()` with no folder finds the project the same way the CLI does.
+  Change values with `settings.replace(top_k=8)`.
+- Loading settings never changes `os.environ`, and API keys are hidden from
+  its `repr`.
+- The pipeline prints nothing by itself. Call `rag_kit.log.show_progress()`, or
+  configure `logging` for the `rag_kit` logger, to see step progress.
 
-The pipeline reports progress through the `rag_kit` logger and prints nothing
-on its own; call `rag_kit.log.show_progress()` (as the CLI does) or configure
-`logging` yourself to see it.
+### HTTP API
 
-## Supported inputs and providers
+```bash
+pip install "ragkit-dev[api]"
+rag-kit serve --port 8000            # or: uvicorn rag_kit.api:app --port 8000
+```
 
-- **Files:** `.pdf` (text layer required), `.txt` and `.md` (UTF-8).
-- **Embeddings:** any sentence-transformers model through Hugging Face, or
-  Gemini embeddings.
-- **LLM:** Gemini via `langchain-google-genai`.
-- **Vector store:** Qdrant, embedded (`QDRANT_PATH`) or server (`QDRANT_URL`).
+- `GET /health` → `{"status": "ok", "ready": true}`
+- `POST /query` with `{"question": "...", "top_k": 4}` →
+  `{"answer": "...", "status": "answered" | "no_results", "sources": [{"page", "source", "score", "marker", "chunk_id", "text"}]}`
 
-### PDF font repair
+The `[S1]` tags are removed from `answer`; each source's `marker` maps back to
+them. Errors in the pipeline (including a missing project) return 503 with the
+reason, and questions over 4000 characters return 422.
 
-Some PDFs embed subset fonts without a `ToUnicode` map, and every extractor
-returns scrambled glyphs (`& ? ! & &`).
-[`pdf_font_repair.py`](https://github.com/shamiulriyad/rag-learning/blob/main/src/rag_kit/pdf_font_repair.py) reverses that
-substitution for one specific book, `-Free-English-Grammar.pdf` (not included
-in this repository or any package; bring your own copy). It is off by default; enable it with
-`PDF_FONT_REPAIR=true` or `--font-repair on`. Its maps are specific to that
-PDF; for other broken PDFs, use OCR instead.
+The API has **no authentication** and listens on `127.0.0.1` only. Don't expose
+it to the internet. To build it into another app, use
+`rag_kit.api.create_app(settings=..., pipeline=...)`.
+
+## Install with pip
+
+Use this instead of the generator if you want rag-kit in an existing project.
+
+```bash
+py -3.11 -m venv .venv               # macOS/Linux: python3.11 -m venv .venv
+.venv\Scripts\activate               # macOS/Linux: source .venv/bin/activate
+python -m pip install -U pip
+pip install "ragkit-dev[local,gemini]"
+```
+
+The package name is **`ragkit-dev`**. `pip install ragkit` installs a different
+project. In code you `import rag_kit`, and the command is `rag-kit`. Upgrade
+with `pip install -U "ragkit-dev[local,gemini]"`; `pip show ragkit-dev` shows
+the installed version.
+
+Choose the extras you need:
+
+| Extra | Adds | Needed for |
+| ----- | ---- | ---------- |
+| *(none)* | LangChain core, Qdrant, PyMuPDF | the basics and `rag-kit check` |
+| `local` | sentence-transformers (with PyTorch) | local embeddings (the default) |
+| `gemini` | langchain-google-genai | answers, and Gemini embeddings |
+| `ui` | Streamlit | `rag-kit ui` |
+| `api` | FastAPI, uvicorn | `rag-kit serve` |
+| `dev` | pytest, httpx, ruff (+ `api`) | running the tests |
+| `all` | `local`, `gemini`, `api`, `ui` | everything |
+
+**Make a project folder.** rag-kit keeps your `.env`, documents and vector
+store in a project folder, marked by a file called `rag-kit.toml`. Nothing is
+written inside the installed package.
+
+```bash
+mkdir my-rag && cd my-rag
+echo "# rag-kit project" > rag-kit.toml     # the marker; its contents don't matter yet
+# copy .env.example from this repository to .env, then set GOOGLE_API_KEY
+rag-kit check
+```
+
+<details>
+<summary>How commands find the project</summary>
+
+1. `--project DIR`, on any command (no marker needed);
+2. otherwise the `RAG_PROJECT_DIR` environment variable;
+3. otherwise the nearest folder at or above the current one that contains
+   `rag-kit.toml`.
+
+If none of these applies, the command stops with an error instead of creating
+a store in an unexpected place. Relative paths in `.env` (`QDRANT_PATH`,
+`PDF_PATH`) are read from the project folder, so commands behave the same in
+any subfolder.
+
+</details>
+
+<details>
+<summary>Linux: install the CPU-only PyTorch first</summary>
+
+On Linux, PyTorch from PyPI pulls in several GB of CUDA libraries. For
+CPU-only local embeddings, install the CPU build from PyTorch's own index
+**first**, in the same environment:
+
+```bash
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+pip install "ragkit-dev[local,gemini]"     # keeps the CPU torch
+
+# with uv:
+uv pip install torch --index-url https://download.pytorch.org/whl/cpu
+uv pip install "ragkit-dev[local,gemini]"
+```
+
+This works on x86_64 and aarch64 with Python 3.11 and 3.12. Later,
+`pip install -U "ragkit-dev[local]"` keeps the CPU build, but
+`pip install -U torch` without the `--index-url` switches to the CUDA build.
+If a CUDA build is already installed, start from a fresh environment, because
+reinstalling torch over it leaves the `nvidia-*` packages behind. Skip the
+first command if you want to use an NVIDIA GPU.
+
+Windows and macOS need no extra step.
+
+</details>
+
+<details>
+<summary>Install from a checkout (to change the code)</summary>
+
+```bash
+git clone https://github.com/shamiulriyad/rag-learning.git
+cd rag-learning
+pip install -e ".[local,gemini]"
+```
+
+Wherever this README says `pip install "ragkit-dev[...]"`, use
+`pip install -e ".[...]"` instead. This repository is itself a project.
+
+To try an unreleased build with the generator, build the wheel and point the
+generator at it (replace `<version>` with the version in `pyproject.toml`):
+
+```bash
+uv build --out-dir dist
+node generator/bin/rag-kit-dev.js my-rag --embeddings gemini --package-spec dist/ragkit_dev-<version>-py3-none-any.whl
+```
+
+</details>
+
+## Settings
+
+Settings live in the project's `.env` file. Environment variables override
+`.env`, and command-line flags such as `--collection`, `-k` and `--min-score`
+override both. The ones you're most likely to change:
+
+| Variable | Default | What it does |
+| -------- | ------- | ------------ |
+| `GOOGLE_API_KEY` | – | your Gemini key |
+| `EMBEDDING_PROVIDER` | `huggingface` | `huggingface` (local) or `google` (Gemini) |
+| `LLM_MODEL` | `gemini-2.5-flash` | the Gemini model that writes answers |
+| `QDRANT_PATH` | – | folder for the local vector store, e.g. `qdrant_data` |
+| `COLLECTION_NAME` | `pdf_rag` | which collection to read and write |
+| `PDF_PATH` | `data/sample.pdf` | the file `rag-kit ingest` uses with no arguments |
+| `TOP_K` | `4` | chunks per question |
+| `MIN_SCORE` | – | ignore chunks below this similarity score |
+
+<details>
+<summary>All settings</summary>
+
+| Variable | Default | What it does |
+| -------- | ------- | ------------ |
+| `GOOGLE_API_KEY` | – | Gemini key (answers; also embeddings when the provider is `google`) |
+| `LLM_MODEL` | `gemini-2.5-flash` | Gemini model for answers |
+| `TEMPERATURE` | `0.2` | LLM temperature |
+| `EMBEDDING_PROVIDER` | `huggingface` | `huggingface` (local) or `google` |
+| `EMBEDDING_MODEL` | `BAAI/bge-m3` | 1024 dimensions; `models/gemini-embedding-001` for `google` |
+| `EMBEDDING_DIM` | auto | set only to skip auto-detection |
+| `QDRANT_PATH` | – | local store folder, e.g. `qdrant_data` (wins over the URL) |
+| `QDRANT_URL` / `QDRANT_API_KEY` | `http://localhost:6333` | Qdrant server, used when `QDRANT_PATH` is not set |
+| `COLLECTION_NAME` | `pdf_rag` | collection to read and write |
+| `PDF_PATH` | `data/sample.pdf` | file for `ingest` with no arguments |
+| `PDF_FONT_REPAIR` | `false` | repair one known PDF with scrambled text (see [PDF notes](#pdf-notes)) |
+| `CHUNK_SIZE` / `CHUNK_OVERLAP` | `1000` / `150` | chunk length and overlap, in characters |
+| `TOP_K` | `4` | chunks per question |
+| `MIN_SCORE` | – | drop chunks below this cosine score |
+| `EMBED_BATCH_SIZE` / `EMBED_SLEEP` | `90` / `0` (`60` for google) | ingestion batch size and pause between batches |
+| `RAG_PROJECT_DIR` | – | project folder (environment only) |
+| `RAG_ENV_FILE` | `<project>/.env` | use another settings file (environment only) |
+| `RAG_EXPORT_ENV` | – | extra `.env` names to export, comma-separated (see below) |
+
+</details>
+
+<details>
+<summary>Settings for other libraries (HF_HOME, proxies)</summary>
+
+Some libraries only read the process environment. Hugging Face reads
+`HF_HOME` when it is first imported, and HTTP clients read proxy variables.
+So that these can live in `.env` too, `rag-kit`, `rag-kit serve` and
+`rag-kit ui` copy an **allow-list** of `.env` keys into the environment at
+startup:
+
+- `HF_*`, `HUGGINGFACE_*`, `TRANSFORMERS_*`, `SENTENCE_TRANSFORMERS_*`, `TORCH_*`,
+  `TOKENIZERS_PARALLELISM`, `CUDA_VISIBLE_DEVICES`, `OMP_NUM_THREADS`
+- `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, `ALL_PROXY` (either case),
+  `REQUESTS_CA_BUNDLE`, `SSL_CERT_FILE`, `SSL_CERT_DIR`, `CURL_CA_BUNDLE`
+- any names you list in `RAG_EXPORT_ENV=NAME1,NAME2`
+
+rag-kit's own settings, including `GOOGLE_API_KEY` and `QDRANT_API_KEY`, and
+any `RAG_*` variable are **never** exported, even if listed. Variables that
+are already set win, empty values are skipped, and only names are printed
+(`rag-kit check` lists them). `HF_TOKEN` is a secret but is exported, because
+Hugging Face reads it only from the environment.
+
+Importing `rag_kit`, creating a `Pipeline` or calling `Settings.load()` never
+changes the environment. In your own program, call
+`rag_kit.env.export_env_file(settings)` before the first local embedding is
+created if you want the same behaviour.
+
+</details>
+
+## PDF notes
+
+- PDFs need a text layer. Scanned PDFs must go through OCR first, for example
+  with `ocrmypdf`.
+- If `ingest` reports pages that "look corrupted", check the text. A table of
+  contents or a page full of formulas can trigger the warning without being
+  broken.
+- **Font repair** is for one specific book, `-Free-English-Grammar.pdf` (not
+  included; bring your own copy), whose fonts make every extractor return
+  scrambled glyphs (`& ? ! & &`).
+  [`pdf_font_repair.py`](https://github.com/shamiulriyad/rag-learning/blob/main/src/rag_kit/pdf_font_repair.py)
+  reverses that substitution. It is off by default; turn it on with
+  `PDF_FONT_REPAIR=true` or `--font-repair on`. For other broken PDFs, use OCR.
+
+## Troubleshooting
+
+| Message | Fix |
+| ------- | --- |
+| `No rag-kit project found` | Run inside a folder with `rag-kit.toml`, pass `--project DIR`, or set `RAG_PROJECT_DIR`. |
+| `[warn] .env  not created yet` (from `rag-kit check`) | Copy the template: `cp .env.example .env` (PowerShell: `Copy-Item .env.example .env`), then set `GOOGLE_API_KEY`. Without `.env`, rag-kit looks for a Qdrant server instead of a local store. |
+| `No local Qdrant store at …` | Ingest something first, or point `QDRANT_PATH` at the existing store. |
+| `… is in use by another process` | The local store allows one process at a time. Stop `serve`, `ui` or other commands, or use a Qdrant server. |
+| `Collection 'x' holds N-dimensional vectors, but … produces M` | The embedding model changed. Restore `EMBEDDING_MODEL`, use another `COLLECTION_NAME`, or add `--recreate`. |
+| `GOOGLE_API_KEY is not set` | Put the key in the project's `.env`. |
+| `… is not installed. Run: pip install "ragkit-dev[…]"` | Install the extra named in the message. |
+| `… could not answer … 429` | Gemini rate limit or quota. Wait, or raise `EMBED_SLEEP` when using Gemini embeddings. |
+| `… page(s) look corrupted` | See [PDF notes](#pdf-notes). Scrambled text: try `--font-repair on`. Scanned PDF: run OCR. |
+| `Unsupported file type` | Convert the file to PDF, `.txt` or `.md`. |
+| The answer says the document doesn't cover it | Try `rag-kit search` with the same question to see which chunks were found, then ask more specifically or raise `-k`. |
+
+## Known limitations
+
+- The local Qdrant store allows one process at a time, so run only one of the
+  CLI, the API or the UI at once.
+- No built-in OCR: scanned PDFs must be converted first.
+- Documents are identified by file name within a collection.
+- Gemini is the only model wired up for writing answers.
+- Chunks indexed before the metadata migration have no `doc_id` or
+  `file_type`. Ingest the file again to add them.
 
 ## Tests
 
-The tests live in the repository, so run them from a checkout:
+The tests live in this repository, so run them from a checkout:
 
 ```bash
 pip install -e ".[dev,gemini]"
@@ -389,33 +476,23 @@ RAG_RUN_INTEGRATION=1 python -m pytest -m integration
 RAG_RUN_INTEGRATION=1 RAG_RUN_GEMINI=1 python -m pytest -m "integration or gemini"   # uses Gemini quota
 ```
 
-They read `COLLECTION_NAME` without changing it, and ingest only into a
-uniquely named collection inside a temporary Qdrant folder. Stop `serve` and
-`ui` first.
+They read `COLLECTION_NAME` without changing it, and they ingest only into a
+uniquely named collection in a temporary Qdrant folder. Stop `serve` and `ui`
+first.
 
-## Troubleshooting
+## Names and versions
 
-| Message | Fix |
-| ------- | --- |
-| `No rag-kit project found` | Run inside a folder with `rag-kit.toml`, pass `--project DIR`, or set `RAG_PROJECT_DIR`. |
-| `[warn] .env  not created yet` (from `rag-kit check`) | Copy the template: `cp .env.example .env` (PowerShell: `Copy-Item .env.example .env`), then set `GOOGLE_API_KEY`. Without `.env`, rag-kit looks for a Qdrant server instead of a local store. |
-| `No local Qdrant store at …` | Ingest something first, or point `QDRANT_PATH` at the existing store. |
-| `… is in use by another process` | Embedded Qdrant allows one process. Stop `serve`/`ui`/other commands, or use a Qdrant server. |
-| `Collection 'x' holds N-dimensional vectors, but … produces M` | The embedding model changed. Restore `EMBEDDING_MODEL`, use another `COLLECTION_NAME`, or `--recreate`. |
-| `GOOGLE_API_KEY is not set` | Put the key in the project's `.env`. |
-| `… is not installed. Run: pip install "ragkit-dev[…]"` | Install the extra named in the message. |
-| `… could not answer … 429` | Gemini rate limit or quota. Wait, or raise `EMBED_SLEEP` when using Gemini embeddings. |
-| `… page(s) look corrupted` | Scrambled text: try `--font-repair on`; scanned PDF: run OCR (e.g. `ocrmypdf`). |
-| `Unsupported file type` | Convert to PDF, `.txt` or `.md`. |
-
-## Known limitations
-
-- Embedded Qdrant is single-process: run one of CLI / API / UI at a time.
-- No OCR: scanned PDFs need to be OCR'd first.
-- Documents are identified by file name within a collection.
-- Only Gemini is wired up for generation.
-- Chunks indexed before the metadata migration lack `doc_id` and `file_type`;
-  re-ingest the file to add them.
+- **`ragkit-dev`** on [PyPI](https://pypi.org/project/ragkit-dev/) is the
+  Python package. You `import rag_kit` and run `rag-kit`.
+- **`rag-kit-dev`** on [npm](https://www.npmjs.com/package/rag-kit-dev) is the
+  project generator, in
+  [`generator/`](https://github.com/shamiulriyad/rag-learning/tree/main/generator).
+  It creates the folder and the Python environment, and it never creates `.env`
+  or asks for your API key.
+- Both packages always have the same version number.
+- Upgrading from the older script-based version? The
+  [CHANGELOG](https://github.com/shamiulriyad/rag-learning/blob/main/CHANGELOG.md)
+  has a table of old and new commands.
 
 ## License
 
