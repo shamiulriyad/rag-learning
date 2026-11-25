@@ -50,9 +50,20 @@ Each chunk carries `source_file`, `doc_id` (content hash), `file_type`, `page`
 - **Step 2: broken font encodings.** Some PDFs embed subset fonts with no
   `ToUnicode` map, so every extractor returns scrambled glyphs (`& ? ! & &`).
   With `PDF_FONT_REPAIR=true`, extraction runs through `pdf_font_repair.py`,
-  which reverses that substitution cipher for the bundled grammar PDF. Every
-  page is then scored (`readable / corrupted / blank`). The maps are
-  PDF-specific; OCR is the general fallback.
+  which reverses that substitution cipher for the bundled grammar PDF. The maps
+  are PDF-specific; OCR is the general fallback.
+- **Step 2: page quality report.** Every page is scored and counted as
+  readable, table of contents, mostly diagrams/formulas, scrambled or blank.
+  Only scrambled pages (under 40 % letters) raise a warning; diagram and
+  formula pages are listed and kept.
+- **Step 3: table-of-contents pages are dropped.** A PDF page where at least
+  five lines (and a fifth of all lines) end in a dot leader
+  (`1.1 Introduction . . . . 3`) is skipped. Those pages match every question
+  that names a chapter and push the real content out of the results. Text and
+  Markdown files are never dropped this way.
+- **Step 3: ligatures.** Single-character ligatures such as `ﬁ` and `ﬂ` become
+  plain letters, so "efﬁcient" is stored and searched as "efficient".
+  Superscripts like `n²` are left alone.
 - **Step 4: tuning.** `CHUNK_SIZE` 800–1200 suits prose; drop to 400–600 for
   dense tables and specs.
 - **Step 5: the vector dimension is detected, not hard-coded.**
