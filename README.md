@@ -74,7 +74,7 @@ connects them, and the command line, the browser UI and the API all use it.
 | ---- | ------ | ------------ |
 | 1 Load | `step01_load_pdf.py` | accepts `.pdf`, `.txt`, `.md`; checks the file before any work |
 | 2 Extract | `step02_extract_text.py` | one document per PDF page; optional font repair |
-| 3 Clean | `step03_clean_text.py` | rejoins broken lines and hyphenated words, drops repeating headers and footers |
+| 3 Clean | `step03_clean_text.py` | rejoins broken lines and hyphenated words, fixes ligatures like `ﬁ`, drops repeating headers, footers and table-of-contents pages |
 | 4 Chunk | `step04_chunking.py` | recursive splitter with overlap; a `chunk_id` per document |
 | 5 Embed | `step05_embedding.py` | local Hugging Face model (default `BAAI/bge-m3`) or Gemini |
 | 6 Store | `step06_vector_store.py` | Qdrant, either a folder on disk or a server |
@@ -421,9 +421,11 @@ created if you want the same behaviour.
 
 - PDFs need a text layer. Scanned PDFs must go through OCR first, for example
   with `ocrmypdf`.
-- If `ingest` reports pages that "look corrupted", check the text. A table of
-  contents or a page full of formulas can trigger the warning without being
-  broken.
+- Table-of-contents pages are skipped automatically, because they match
+  chapter names in questions without answering them.
+- Pages that are mostly diagrams, formulas or tables are listed during
+  `ingest` and kept. Only pages that "look scrambled" get a warning: check
+  their text, and run OCR if it is unreadable.
 - **Font repair** is for one specific book, `-Free-English-Grammar.pdf` (not
   included; bring your own copy), whose fonts make every extractor return
   scrambled glyphs (`& ? ! & &`).
@@ -443,7 +445,7 @@ created if you want the same behaviour.
 | `GOOGLE_API_KEY is not set` | Put the key in the project's `.env`. |
 | `… is not installed. Run: pip install "ragkit-dev[…]"` | Install the extra named in the message. |
 | `… could not answer … 429` | Gemini rate limit or quota. Wait, or raise `EMBED_SLEEP` when using Gemini embeddings. |
-| `… page(s) look corrupted` | See [PDF notes](#pdf-notes). Scrambled text: try `--font-repair on`. Scanned PDF: run OCR. |
+| `… page(s) look scrambled` | See [PDF notes](#pdf-notes). Scanned or unreadable text: run OCR. For `-Free-English-Grammar.pdf` only: `--font-repair on`. |
 | `Unsupported file type` | Convert the file to PDF, `.txt` or `.md`. |
 | The answer says the document doesn't cover it | Try `rag-kit search` with the same question to see which chunks were found, then ask more specifically or raise `-k`. |
 

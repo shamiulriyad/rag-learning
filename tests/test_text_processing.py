@@ -1,13 +1,21 @@
 """Steps 1-4: input validation, extraction, cleaning, chunking."""
 
+import logging
+
 import pytest
 from langchain_core.documents import Document
 
 from rag_kit.errors import ExtractionError, UnsupportedFileError
 from rag_kit.step01_load_pdf import load_document
 from rag_kit.step02_extract_text import extract_text
-from rag_kit.step03_clean_text import clean_documents, clean_text
+from rag_kit.step03_clean_text import clean_documents, clean_text, is_table_of_contents
 from rag_kit.step04_chunking import chunk_documents
+
+# Shaped like PyMuPDF's output for a typeset contents page: entries with dot
+# leaders, section and page numbers on lines of their own.
+TOC_PAGE = "\n".join(
+    f"{n}\nSection {n} title . . . . . . . . . . . . . . . . . .\n{10 * n}" for n in range(1, 7)
+)
 
 # --- step 1 -------------------------------------------------------------------
 
@@ -91,6 +99,24 @@ def test_extract_reports_broken_pdf(tmp_path):
         extract_text(path)
 
 
+def test_extract_separates_contents_diagram_and_scrambled_pages(tmp_path, caplog):
+    pdf = _make_pdf(tmp_path / "book.pdf", [
+        "Readable page about nouns and verbs in plain English sentences.",
+        TOC_PAGE,
+        "A 1 B 2 C 3 D 4 E 5 F 6 G 7 H 8",        # graph labels: few words, not garbage
+        "& ? ! & & % ? ! & & % ? ! & & % ? !",     # scrambled glyphs
+    ])
+    with caplog.at_level(logging.INFO, logger="rag_kit"):
+        extract_text(pdf, font_repair=False)
+
+    assert ("1 readable, 1 table of contents, 1 mostly diagrams/formulas, 1 scrambled, "
+            "0 blank") in caplog.text
+    assert "mostly diagrams, formulas or tables and are kept: p3" in caplog.text
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("1 page(s) look scrambled: p4" in w for w in warnings)
+    assert not any("p2" in w or "p3" in w for w in warnings)
+
+
 # --- step 3 -------------------------------------------------------------------
 
 
@@ -100,6 +126,30 @@ def test_clean_text_repairs_pdf_artifacts():
     assert cleaned.startswith("This is information that wraps mid sentence.")
     assert cleaned.endswith("Next paragraph.")
     assert "12" not in cleaned and "  " not in cleaned and "\n\n\n" not in cleaned
+
+
+def test_clean_text_replaces_ligatures_but_keeps_superscripts():
+    assert clean_text("An efﬁcient ﬂow, ofﬂine, in O(n²) time.") == \
+        "An efficient flow, offline, in O(n²) time."
+
+
+def test_table_of_contents_detection():
+    assert is_table_of_contents(TOC_PAGE)
+    assert is_table_of_contents("Index . . . . . . . . . iv\n" * 5)
+    prose = "\n".join(f"Line {i} of an ordinary page about graphs... and trees." for i in range(30))
+    assert not is_table_of_contents(prose)
+    # A couple of dotted entries on a long page of prose is not a contents page.
+    assert not is_table_of_contents(prose + "\nSee also . . . . . . 12\nNotes . . . . . . 13")
+
+
+def test_clean_documents_drops_contents_pages_but_never_a_whole_text_file():
+    body = "Real content about graphs that is long enough to keep on the page. " * 2
+    pages = [Document(page_content=TOC_PAGE, metadata={"page_number": 1}),
+             Document(page_content=body, metadata={"page_number": 2})]
+    text_file = Document(page_content=TOC_PAGE + "\n" + body, metadata={"page_number": None})
+
+    assert [d.metadata["page_number"] for d in clean_documents(pages)] == [2]
+    assert len(clean_documents([text_file])) == 1
 
 
 def test_clean_documents_drops_headers_and_blank_pages():
