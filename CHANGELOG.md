@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.1.2 (2026-11-26)
+
+A new chat UI, and cleaner ingestion of typeset books.
+
+- **UI (`rag-kit ui`):** a chat page. The question box stays at the bottom of
+  the page after every answer, and the chat keeps its history. Each answer
+  shows its sources as cards (file, page, relevance, full text) and a footer
+  with the number of sources and the time taken. **Sources only** shows the
+  matching chunks without an AI call. The sidebar library adds documents in a
+  dialog (drag and drop) and deletes them after a confirmation. A new project
+  shows "Your library is empty" instead of an error, and Streamlit's unrelated
+  "Deploy" button is hidden.
+- **Ingest:** table-of-contents pages (lines ending in dot leaders) are no
+  longer indexed. They matched every question that named a chapter and pushed
+  the real content out of the results. Text and Markdown files are never
+  dropped this way.
+- **Ingest:** ligature characters such as `ﬁ` become plain letters, so
+  "efﬁcient" is stored and searched as "efficient". Superscripts are kept.
+- **Ingest:** the page report separates table-of-contents, diagram/formula and
+  scrambled pages. Only scrambled pages warn, and the hint no longer suggests
+  font repair for ordinary PDFs.
+- **Docs:** the README is rewritten for first-time users.
+- To apply the ingest fixes to documents indexed with an older version, ingest
+  them again; re-ingesting replaces their chunks.
+
 ## 0.1.1 (2026-11-10)
 
 Release fix only; the `ragkit-dev` package code is the same as 0.1.0.

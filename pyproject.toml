@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ragkit-dev"
-version = "0.1.1"
+version = "0.1.2"
 description = "A reusable, developer-focused RAG toolkit for document ingestion, retrieval, and source-grounded answers."
 readme = "README.md"
 license = "MIT"
