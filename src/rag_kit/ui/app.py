@@ -3,14 +3,17 @@
     pip install "ragkit-dev[ui]"
     rag-kit ui                             # http://localhost:8501
 
-Chat with your documents, see the chunks behind every answer, and add new
-documents. Uploads are saved under the project's uploads/ folder (git-ignored).
-Local Qdrant allows one process at a time, so stop `serve` or other CLI
-commands while this runs. `rag-kit ui` passes the project in RAG_PROJECT_DIR.
+A chat with your documents. The question box stays at the bottom of the page,
+every answer shows the chunks (and pages) it came from, and the sidebar library
+adds and deletes documents. Uploads are saved under the project's uploads/
+folder (git-ignored). Local Qdrant allows one process at a time, so stop
+`serve` or other CLI commands while this runs. `rag-kit ui` passes the project
+in RAG_PROJECT_DIR.
 """
 
 import html
 import re
+import time
 from pathlib import Path
 
 import streamlit as st
@@ -21,7 +24,7 @@ from rag_kit.log import show_progress
 from rag_kit.pipeline import Pipeline
 from rag_kit.settings import SUPPORTED_EXTENSIONS, default_settings
 from rag_kit.step05_embedding import get_embeddings
-from rag_kit.step06_vector_store import describe_location, get_client
+from rag_kit.step06_vector_store import collection_exists, describe_location, get_client
 
 st.set_page_config(page_title="rag-kit", page_icon=":material/menu_book:", layout="wide")
 show_progress()  # step progress in the terminal running streamlit, as before
@@ -33,7 +36,7 @@ except RagError as exc:  # no rag-kit project found
 export_env_file(settings)  # HF_HOME, proxies etc. before the model loads
 UPLOAD_DIR = settings.project_dir / "uploads"
 
-ANSWER, RETRIEVE = "Answer", "Retrieve only"
+ANSWER, SOURCES = "Answer with AI", "Sources only"
 SUGGESTIONS = [
     "What topics does this document cover?",
     "What are the key terms and their definitions?",
@@ -44,20 +47,21 @@ _CITATION_RE = re.compile(r"[ \t]*\[S(\d+)\]")
 # Colors are translucent so the same rules read well in light and dark themes.
 STYLE = """
 <style>
-.block-container {padding-top: 2.2rem; max-width: 1150px;}
-.rk-hero {padding: 1.4rem 1.6rem 1.2rem; border-radius: 18px; margin-bottom: .6rem;
-  background: linear-gradient(135deg, rgba(99,102,241,.16), rgba(14,165,233,.10));
-  border: 1px solid rgba(99,102,241,.28);}
-.rk-title {font-size: 2.1rem; font-weight: 800; line-height: 1.15; letter-spacing: -.02em;
+.block-container {padding-top: 2rem; max-width: 1100px;}
+.rk-hero {padding: 1rem 1.3rem; border-radius: 16px; margin-bottom: .4rem;
+  background: linear-gradient(135deg, rgba(99,102,241,.14), rgba(14,165,233,.08));
+  border: 1px solid rgba(99,102,241,.26);}
+.rk-row {display: flex; flex-wrap: wrap; align-items: baseline; gap: .4rem 1rem;}
+.rk-title {font-size: 1.7rem; font-weight: 800; line-height: 1.1; letter-spacing: -.02em;
   background: linear-gradient(90deg, #6366f1, #0ea5e9); -webkit-background-clip: text;
-  background-clip: text; color: transparent; width: fit-content;}
-.rk-sub {margin-top: .3rem; opacity: .75; font-size: 1rem;}
-.rk-stats {display: flex; flex-wrap: wrap; gap: .6rem; margin-top: 1rem;}
-.rk-stat {padding: .55rem .9rem; border-radius: 12px; min-width: 105px;
-  background: rgba(127,127,127,.09); border: 1px solid rgba(127,127,127,.20);}
-.rk-stat b {display: block; font-size: 1.1rem; font-weight: 700; white-space: nowrap;}
-.rk-stat span {font-size: .7rem; opacity: .65; text-transform: uppercase; letter-spacing: .06em;}
-.rk-empty {text-align: center; padding: 2.2rem 1rem 1rem; opacity: .8;}
+  background-clip: text; color: transparent;}
+.rk-sub {opacity: .75; font-size: .95rem;}
+.rk-stats {display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .8rem;}
+.rk-stat {padding: .35rem .75rem; border-radius: 10px;
+  background: rgba(127,127,127,.09); border: 1px solid rgba(127,127,127,.20); font-size: .85rem;}
+.rk-stat b {font-weight: 700; margin-right: .3rem;}
+.rk-stat span {opacity: .7;}
+.rk-empty {text-align: center; padding: 2rem 1rem 1rem; opacity: .85;}
 .rk-empty b {display: block; font-size: 1.15rem; margin-bottom: .3rem;}
 </style>
 """
@@ -86,21 +90,30 @@ def error_text(exc: Exception) -> str:
     return str(exc) if isinstance(exc, (RagError, ValueError)) else f"Unexpected error: {exc!r}"
 
 
+def count_of(n: int, word: str) -> str:
+    """'1 chunk', '620 chunks'."""
+    return f"{n:,} {word}{'' if n == 1 else 's'}"
+
+
+def flash(state: str, text: str) -> None:
+    """A message to show once, after the next rerun."""
+    st.session_state.setdefault("flash", []).append((state, text))
+
+
 # --- rendering helpers ---------------------------------------------------------------
-def hero(collection: str, docs: dict) -> None:
+def header(collection: str, docs: dict) -> None:
     stats = [
         (len(docs), "documents"),
         (f"{sum(docs.values()):,}", "chunks"),
         (collection, "collection"),
-        (settings.embedding_model.split("/")[-1], "embedding"),
-        (settings.llm_model, "answer model"),
+        (settings.llm_model, "answers"),
     ]
     tiles = "".join(f'<div class="rk-stat"><b>{html.escape(str(value))}</b>'
                     f"<span>{label}</span></div>" for value, label in stats)
     st.markdown(
-        '<div class="rk-hero"><div class="rk-title">rag-kit</div>'
-        '<div class="rk-sub">Ask your documents anything. Every answer shows the pages it '
-        f'came from.</div><div class="rk-stats">{tiles}</div></div>',
+        '<div class="rk-hero"><div class="rk-row"><div class="rk-title">rag-kit</div>'
+        '<div class="rk-sub">Ask your documents. Every answer shows the pages it came from.'
+        f'</div></div><div class="rk-stats">{tiles}</div></div>',
         unsafe_allow_html=True,
     )
 
@@ -128,7 +141,7 @@ def source_cards(chunks: list) -> None:
             st.caption(" · ".join(d for d in details if d))
             st.progress(min(max(chunk["score"], 0.0), 1.0),
                         text=f"relevance {chunk['score']:.3f}")
-            with st.expander("Read chunk"):
+            with st.expander("Read the text"):
                 st.text(chunk["text"])
 
 
@@ -140,12 +153,10 @@ def render_reply(msg: dict) -> None:
         st.info(msg["text"], icon=":material/search_off:")
     elif kind == "answer":
         st.markdown(with_badges(msg["text"]))
-    else:  # retrieve only
-        st.markdown(f":gray[{msg['text']}]")
     if msg["chunks"]:
-        if kind == "answer":
-            st.markdown(":gray[**Sources**]")
         source_cards(msg["chunks"])
+    if msg.get("footer"):
+        st.caption(msg["footer"])
 
 
 def render_message(msg: dict) -> None:
@@ -158,7 +169,8 @@ def render_message(msg: dict) -> None:
 
 
 def run_query(pipeline: Pipeline, question: str, mode: str, top_k: int, min_score: float) -> dict:
-    reply = {"role": "assistant", "kind": "error", "text": "", "chunks": []}
+    reply = {"role": "assistant", "kind": "error", "text": "", "chunks": [], "footer": ""}
+    started = time.perf_counter()
     try:
         if mode == ANSWER:
             result = pipeline.ask(question, k=top_k, min_score=min_score or None)
@@ -166,11 +178,18 @@ def run_query(pipeline: Pipeline, question: str, mode: str, top_k: int, min_scor
                          text=result.answer, chunks=pack(result.scored_docs))
         else:
             scored = pipeline.search(question, k=top_k, min_score=min_score or None)
-            reply.update(kind="retrieve" if scored else "empty", chunks=pack(scored),
-                         text=f"{len(scored)} matching chunks, no LLM call." if scored else
-                         "No chunks matched. Lower the minimum score or add a document.")
+            reply.update(kind="sources" if scored else "empty", chunks=pack(scored),
+                         text="No part of your documents matched. Lower the minimum relevance "
+                              "or add a document.")
     except Exception as exc:  # noqa: BLE001 - shown in the UI
         reply["text"] = error_text(exc)
+        return reply
+    seconds = time.perf_counter() - started
+    sources = count_of(len(reply["chunks"]), "source")
+    if reply["kind"] == "answer":
+        reply["footer"] = f"Answered from {sources} · {seconds:.1f} s"
+    elif reply["kind"] == "sources":
+        reply["footer"] = f"{sources} found, no AI call · {seconds:.1f} s"
     return reply
 
 
@@ -178,127 +197,141 @@ def queue_question(question: str) -> None:
     st.session_state["pending_question"] = question
 
 
-# --- sidebar: settings ----------------------------------------------------------------
+@st.dialog("Add documents", width="large")
+def add_documents(pipeline: Pipeline, collection: str) -> None:
+    st.caption(f"Each file is split into chunks and stored in the **{collection}** collection. "
+               "Adding a file with the same name again replaces the old version.")
+    uploads = st.file_uploader("PDF, text or Markdown files",
+                               type=[e.lstrip(".") for e in SUPPORTED_EXTENSIONS],
+                               accept_multiple_files=True)
+    font_repair = st.toggle("PDF font repair", value=settings.pdf_font_repair,
+                            help="Leave this off. It only fixes one specific PDF whose text "
+                                 "comes out as scrambled symbols.")
+    st.caption("A long book can take several minutes on a laptop. Keep this window open.")
+    if not st.button("Add to library", type="primary", icon=":material/upload:",
+                     disabled=not uploads, width="stretch"):
+        return
+    UPLOAD_DIR.mkdir(exist_ok=True)
+    for upload in uploads:
+        path = UPLOAD_DIR / Path(upload.name).name
+        path.write_bytes(upload.getbuffer())
+        with st.status(f"Adding {path.name}...") as status:
+            try:
+                report = pipeline.ingest(path, font_repair=font_repair)
+                flash("ok", f"Added **{path.name}**: {count_of(report['stored'], 'chunk')} "
+                            f"from {count_of(report['pages'], 'page')}.")
+                status.update(label=f"{path.name}: added", state="complete")
+            except Exception as exc:  # noqa: BLE001 - shown in the UI
+                flash("error", f"Could not add **{path.name}**: {error_text(exc)}")
+                status.update(label=f"{path.name}: failed", state="error")
+    st.rerun()  # closes the dialog and refreshes the library
+
+
+# --- sidebar: settings (rendered first: everything else depends on the collection) ---
 st.markdown(STYLE, unsafe_allow_html=True)
+library = st.sidebar.container()
 with st.sidebar:
+    st.divider()
     st.markdown("### :material/tune: Settings")
     collection = st.text_input("Collection", value=settings.collection_name,
-                               help="The Qdrant collection to ask and add documents to.").strip()
-    mode = st.segmented_control("Mode", [ANSWER, RETRIEVE], default=ANSWER, required=True,
-                                help="Retrieve only shows the matching chunks without "
-                                     "calling the LLM.")
-    top_k = st.slider("Chunks per question", 1, 20, settings.top_k)
-    min_score = st.slider("Minimum score", 0.0, 1.0, float(settings.min_score or 0.0), 0.05,
-                          help="Drop chunks below this similarity. 0 keeps all of them.")
+                               help="A separate library of documents. Each collection has "
+                                    "its own files and chat.").strip()
+    mode = st.segmented_control("Answer mode", [ANSWER, SOURCES], default=ANSWER, required=True,
+                                help="Sources only shows the matching parts of your documents "
+                                     "without calling the AI. It is free and instant.")
+    top_k = st.slider("Sources per answer", 1, 20, settings.top_k,
+                      help="How many chunks are read for each question. More gives broader "
+                           "answers but takes longer.")
+    min_score = st.slider("Minimum relevance", 0.0, 1.0, float(settings.min_score or 0.0), 0.05,
+                          help="Ignore chunks less similar to the question than this. "
+                               "0 keeps all of them.")
     if not settings.google_api_key:
-        st.warning("GOOGLE_API_KEY is not set. Retrieval works, answers will fail.",
-                   icon=":material/key_off:")
+        st.warning("GOOGLE_API_KEY is not set in .env. Sources only works; answers need the "
+                   "key.", icon=":material/key_off:")
+    st.divider()
+    new_chat = st.button("New chat", icon=":material/add_comment:", width="stretch")
+    st.caption(f"Embedding: {settings.embedding_model}  \nAnswers: {settings.llm_model}  \n"
+               f"Store: {describe_location(settings)}")
 
 if not collection:
     st.info("Enter a collection name in the sidebar to start.")
     st.stop()
 pipeline = pipeline_for(collection)
 
+docs, docs_error = {}, None
 try:
-    docs, docs_error = pipeline.documents(), None
+    if collection_exists(shared_client(), collection, settings):  # a new project has none yet
+        docs = pipeline.documents()
 except RagError as exc:
-    docs, docs_error = {}, str(exc)
+    docs_error = str(exc)
 
 chat_key = f"chat::{collection}"
+if new_chat:
+    st.session_state[chat_key] = []
 history = st.session_state.setdefault(chat_key, [])
 
-# --- sidebar: library -----------------------------------------------------------------
-with st.sidebar:
-    st.divider()
+# --- sidebar: library -------------------------------------------------------------------
+with library:
     st.markdown("### :material/library_books: Library")
+    if st.button("Add documents", type="primary", icon=":material/upload_file:", width="stretch"):
+        add_documents(pipeline, collection)
     if docs:
-        for name, chunks in sorted(docs.items()):
-            st.markdown(f":material/description: **{name}**  \n:gray[{chunks:,} chunks]")
+        for name, chunks in docs.items():
+            text_col, delete_col = st.columns([5, 1], vertical_alignment="center")
+            text_col.markdown(f"**{name}**  \n:gray[{count_of(chunks, 'chunk')}]")
+            with delete_col.popover(":material/delete:", help=f"Delete {name}"):
+                st.markdown(f"Delete **{name}** and its {count_of(chunks, 'chunk')} from this "
+                            "collection?")
+                if st.button("Delete", type="primary", key=f"delete::{collection}::{name}"):
+                    try:
+                        removed = pipeline.delete(name)
+                        flash("ok", f"Deleted **{name}** ({count_of(removed, 'chunk')}).")
+                    except Exception as exc:  # noqa: BLE001 - shown in the UI
+                        flash("error", f"Could not delete **{name}**: {error_text(exc)}")
+                    st.rerun()
     else:
-        st.caption(docs_error or "No documents yet. Add one in the Add documents tab.")
-    st.divider()
-    # Never disabled: the sidebar renders before this run's question is added.
-    if st.button("Clear chat", icon=":material/delete_sweep:", width="stretch"):
-        st.session_state[chat_key] = []
-        st.rerun()
-    st.caption(f"Store: {describe_location(settings)}")
+        st.caption(docs_error or "No documents yet.")
 
-hero(collection, docs)
-tab_chat, tab_add = st.tabs([":material/forum: Chat", ":material/upload_file: Add documents"])
+# --- main: header, messages, chat ---------------------------------------------------------
+header(collection, docs)
+for state, text in st.session_state.pop("flash", []):
+    if state == "ok":
+        st.success(text, icon=":material/check_circle:")
+    else:
+        st.error(text, icon=":material/error:")
 
-# --- chat -------------------------------------------------------------------------------
-with tab_chat:
-    feed = st.container()
-    empty_state = feed.empty()
-    if not history:
-        with empty_state.container():
-            st.markdown('<div class="rk-empty"><b>Ask your first question</b>'
-                        "Answers cite their sources as S1, S2... with the page number."
-                        "</div>", unsafe_allow_html=True)
-            columns = st.columns(len(SUGGESTIONS))
-            for column, suggestion in zip(columns, SUGGESTIONS):
-                column.button(suggestion, width="stretch", on_click=queue_question,
-                              args=(suggestion,), disabled=not docs)
-    with feed:
-        for msg in history:
-            render_message(msg)
+# In the main body (not in a tab or column) the question box is pinned to the bottom of
+# the page, so it is always there for the next question.
+question = st.chat_input("Ask a question about your documents" if docs else
+                         "Add a document in the sidebar to start asking", disabled=not docs)
+question = (question or st.session_state.pop("pending_question", None) or "").strip()
 
-    question = st.chat_input("Ask about your documents...", disabled=not docs)
-    question = (question or st.session_state.pop("pending_question", None) or "").strip()
-    if question:
-        empty_state.empty()
-        user_msg = {"role": "user", "text": question}
-        history.append(user_msg)
-        with feed:
-            render_message(user_msg)
-            with st.chat_message("assistant", avatar=":material/auto_stories:"):
-                with st.spinner("Reading the documents..." if mode == RETRIEVE
-                                else "Reading the documents and writing an answer..."):
-                    reply = run_query(pipeline, question, mode, top_k, min_score)
-                render_reply(reply)
-        history.append(reply)
+if not docs and not history:
+    st.markdown('<div class="rk-empty"><b>Your library is empty</b>'
+                "Add a PDF, text or Markdown file, then ask questions about it.</div>",
+                unsafe_allow_html=True)
+    _, middle, _ = st.columns([1, 1, 1])
+    if middle.button("Add your first document", type="primary", icon=":material/upload_file:",
+                     width="stretch"):
+        add_documents(pipeline, collection)
+elif not history and not question:
+    st.markdown('<div class="rk-empty"><b>Ask your first question</b>'
+                "Type it in the box at the bottom, or start with one of these. Answers cite "
+                "their sources as S1, S2... with the page number.</div>",
+                unsafe_allow_html=True)
+    for column, suggestion in zip(st.columns(len(SUGGESTIONS)), SUGGESTIONS):
+        column.button(suggestion, width="stretch", on_click=queue_question, args=(suggestion,))
 
-# --- add documents ----------------------------------------------------------------------
-with tab_add:
-    left, right = st.columns([3, 2], gap="large")
-    with left:
-        uploads = st.file_uploader("Drop PDF, text or Markdown files",
-                                   type=[e.lstrip(".") for e in SUPPORTED_EXTENSIONS],
-                                   accept_multiple_files=True)
-        start = st.button("Ingest", type="primary", icon=":material/rocket_launch:",
-                          disabled=not uploads)
-    with right, st.container(border=True):
-        st.markdown("**What happens on ingest**")
-        st.markdown("1. Text is extracted page by page and cleaned\n"
-                    "2. It is split into overlapping chunks\n"
-                    f"3. Each chunk is embedded and stored in :blue-badge[{collection}]")
-        font_repair = st.toggle("PDF font repair", value=settings.pdf_font_repair,
-                                help="Only for PDFs whose text extracts as scrambled glyphs.")
-        st.caption("Re-ingesting a file with the same name replaces its chunks.")
+for msg in history:
+    render_message(msg)
 
-    if start:
-        UPLOAD_DIR.mkdir(exist_ok=True)
-        reports = []
-        for upload in uploads:
-            path = UPLOAD_DIR / Path(upload.name).name
-            path.write_bytes(upload.getbuffer())
-            with st.status(f"Ingesting {path.name}...") as status:
-                try:
-                    report = pipeline.ingest(path, font_repair=font_repair)
-                    reports.append(("ok", f"**{path.name}**: {report['stored']} chunks from "
-                                          f"{report['pages']} page(s); the collection now "
-                                          f"holds {report['total']:,}"
-                                    + (f" ({report['removed_outdated']} outdated chunks "
-                                       "removed)" if report["removed_outdated"] else "")))
-                    status.update(label=f"{path.name}: done", state="complete")
-                except Exception as exc:  # noqa: BLE001 - shown in the UI
-                    reports.append(("error", f"**{path.name}**: {error_text(exc)}"))
-                    status.update(label=f"{path.name}: failed", state="error")
-        st.session_state["ingest_reports"] = reports
-        st.rerun()  # refresh the library and stats with the new documents
-
-    for state, text in st.session_state.get("ingest_reports", []):
-        if state == "ok":
-            st.success(text, icon=":material/check_circle:")
-        else:
-            st.error(text, icon=":material/error:")
+if question:
+    user_msg = {"role": "user", "text": question}
+    history.append(user_msg)
+    render_message(user_msg)
+    with st.chat_message("assistant", avatar=":material/auto_stories:"):
+        with st.spinner("Finding the matching sources..." if mode == SOURCES
+                        else "Reading your documents and writing an answer..."):
+            reply = run_query(pipeline, question, mode, top_k, min_score)
+        render_reply(reply)
+    history.append(reply)

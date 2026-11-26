@@ -197,10 +197,13 @@ pip install "ragkit-dev[ui]"
 rag-kit ui                           # http://localhost:8501
 ```
 
-Upload documents, ask questions or run retrieval only, and inspect the
-scores, pages and text of the chunks behind each answer. Uploads are saved in
-the project's `uploads/` folder. It is a tool for testing, not a production
-front end.
+A chat with your documents. The question box stays at the bottom of the page,
+so you can keep asking; each answer shows its sources as cards with the file,
+page, relevance and full text. Switch to **Sources only** to see the matching
+chunks without an AI call. The sidebar library adds documents (drag and drop)
+and deletes them, and **New chat** starts over. Uploads are saved in the
+project's `uploads/` folder. It is a tool for testing, not a production front
+end.
 
 ### Python
 

@@ -271,6 +271,7 @@ def test_ui_runs_the_packaged_streamlit_app(captured_launch):
     app = Path(cmd[4])
     assert app.is_file() and app.name == "app.py"
     assert Path(rag_kit.__file__).resolve().parent / "ui" == app.resolve().parent
+    assert cmd[cmd.index("--client.toolbarMode") + 1] == "minimal"   # no "Deploy" button
 
 
 # --- documents --json -------------------------------------------------------------
