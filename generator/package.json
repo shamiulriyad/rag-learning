@@ -1,6 +1,6 @@
 {
   "name": "rag-kit-dev",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Create a rag-kit project with one command: npx rag-kit-dev my-rag",
   "type": "module",
   "bin": {
