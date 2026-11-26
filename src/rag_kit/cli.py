@@ -392,8 +392,11 @@ def cmd_ui(args) -> int:
     env = _child_env(args, "UI starts on")
     app = importlib.resources.files("rag_kit.ui").joinpath("app.py")
     with importlib.resources.as_file(app) as path:
+        # toolbarMode=minimal hides Streamlit's own "Deploy" button, which has nothing to
+        # do with rag-kit and confuses people trying the UI.
         return subprocess.call([sys.executable, "-m", "streamlit", "run", str(path),
-                                "--server.port", str(args.port)], env=env)
+                                "--server.port", str(args.port),
+                                "--client.toolbarMode", "minimal"], env=env)
 
 
 # --- argument parsing --------------------------------------------------------
